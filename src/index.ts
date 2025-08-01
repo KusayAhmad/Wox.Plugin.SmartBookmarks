@@ -300,6 +300,15 @@ class SmartBookmarksPlugin implements Plugin {
           includeLocalBookmarks: await this.api.GetSetting(ctx, "includeLocalBookmarks") || "true",
           showBrowserSource: await this.api.GetSetting(ctx, "showBrowserSource") || "true"
         };
+      } else {
+        // Fallback to default settings if API is not available
+        this.settings = {
+          enabledBrowsers: "all",
+          refreshInterval: "30",
+          maxResults: "20",
+          includeLocalBookmarks: "true",
+          showBrowserSource: "true"
+        };
       }
       
       console.log(`[SmartBookmarks] Initializing with settings:`, this.settings);

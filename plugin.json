@@ -16,14 +16,6 @@
   "SupportedOS": [
     "windows"
   ],
-  "Features": [
-    {
-      "Name": "debounce",
-      "Params": {
-        "intervalMs": "200"
-      }
-    }
-  ],
   "SettingDefinitions": [
     {
       "Type": "select",
