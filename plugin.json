@@ -7,7 +7,7 @@
   "Name": "Smart Bookmarks (TS)",
   "Description": "Smart Bookmarks plugin for Wox",
   "Author": "Kusay Ahmad",
-  "Version": "0.0.1",
+  "Version": "0.0.3",
   "MinWoxVersion": "2.0.0",
   "Runtime": "Nodejs",
   "Website": "https://github.com/KusayAhmad/Wox.Plugin.SmartBookmarks",

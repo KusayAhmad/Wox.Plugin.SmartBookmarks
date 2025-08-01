@@ -1,6 +1,7 @@
-import { Plugin, Query, Result, Context, PluginInitParams } from "@wox-launcher/wox-plugin";
+import { Plugin, Query, Result, Context, PublicAPI, PluginInitParams } from "@wox-launcher/wox-plugin";
 import * as fs from "fs";
 import * as path from "path";
+import { exec } from "child_process";
 
 interface Bookmark {
   title: string;
@@ -126,20 +127,33 @@ class SmartBookmarksPlugin implements Plugin {
 
   private constructor() {
     console.log(`[SmartBookmarks] Constructor called`);
+    
+    // Ensure this is properly initialized
+    if (!this) {
+      console.error(`[SmartBookmarks] Constructor called with undefined 'this'`);
+      return;
+    }
+    
     // Initialize with empty state to prevent null access
     this.bookmarks = [];
     this.initialized = false;
-    
-    // Clean up any existing watcher
-    if (this.watcher) {
-      this.watcher.close();
-      this.watcher = null;
-    }
+    this.lastCheck = 0;
+    this.watcher = null;
 
     // Bind methods to this instance
     this.init = this.init.bind(this);
     this.query = this.query.bind(this);
     this.refreshBookmarks = this.refreshBookmarks.bind(this);
+    this.openUrl = this.openUrl.bind(this);
+    this.action = this.action.bind(this);
+    
+    console.log(`[SmartBookmarks] Methods bound:`, {
+      init: typeof this.init,
+      query: typeof this.query,
+      openUrl: typeof this.openUrl,
+      action: typeof this.action,
+      hasThis: !!this
+    });
     // Log the current instance state
     console.log(`[SmartBookmarks] Initial state:`, {
       hasInstance: !!SmartBookmarksPlugin.instance,
@@ -250,11 +264,13 @@ class SmartBookmarksPlugin implements Plugin {
           SubTitle: bm.description || bm.url,
           Icon: { ImageType: "relative", ImageData: "icon.png" },
           Score: 100,
-          JsonRPCAction: {
-            method: "openUrl",
-            parameters: [bm.url],
-            dontHideAfterAction: false
-          }
+          Actions: [{
+            Name: "Open in Browser",
+            Action: async (context: any) => {
+              console.log(`[SmartBookmarks] Action triggered for URL: ${bm.url}`);
+              this.openUrlDirectly(bm.url);
+            }
+          }]
         }));
     } catch (error) {
       console.error(`[SmartBookmarks] Error in query:`, error);
@@ -266,7 +282,86 @@ class SmartBookmarksPlugin implements Plugin {
       }];
     }
   }
+
+  async openUrl(ctx: Context, ...params: any[]): Promise<void> {
+    try {
+      const url = params[0] as string;
+      console.log(`[SmartBookmarks] Opening URL: ${url} (params:`, params, `)`);
+      
+      if (!url) {
+        console.error(`[SmartBookmarks] No URL provided to openUrl method`);
+        return;
+      }
+      
+      this.openUrlDirectly(url);
+    } catch (error) {
+      console.error(`[SmartBookmarks] Error in openUrl:`, error);
+    }
+  }
+
+  private openUrlDirectly(url: string): void {
+    try {
+      console.log(`[SmartBookmarks] Opening URL directly: ${url}`);
+      
+      // Use Windows 'start' command to open URL in default browser
+      exec(`start "" "${url}"`, (error, stdout, stderr) => {
+        if (error) {
+          console.error(`[SmartBookmarks] Error opening URL: ${error.message}`);
+          return;
+        }
+        if (stderr) {
+          console.error(`[SmartBookmarks] stderr: ${stderr}`);
+          return;
+        }
+        console.log(`[SmartBookmarks] Successfully opened URL: ${url}`);
+      });
+    } catch (error) {
+      console.error(`[SmartBookmarks] Error in openUrlDirectly:`, error);
+    }
+  }
+
+  async action(ctx: Context, result: any): Promise<void> {
+    try {
+      const url = result.ContextData;
+      console.log(`[SmartBookmarks] Action called with URL: ${url}`);
+      
+      if (!url) {
+        console.error(`[SmartBookmarks] No URL in ContextData`);
+        return;
+      }
+      
+      // Use Windows 'start' command to open URL in default browser
+      exec(`start "" "${url}"`, (error, stdout, stderr) => {
+        if (error) {
+          console.error(`[SmartBookmarks] Error opening URL: ${error.message}`);
+          return;
+        }
+        if (stderr) {
+          console.error(`[SmartBookmarks] stderr: ${stderr}`);
+          return;
+        }
+        console.log(`[SmartBookmarks] Successfully opened URL: ${url}`);
+      });
+    } catch (error) {
+      console.error(`[SmartBookmarks] Error in action:`, error);
+    }
+  }
 }
 
-// Export a singleton instance
-export const plugin = SmartBookmarksPlugin.getInstance();
+// Export plugin functions directly instead of a singleton instance
+const pluginInstance = SmartBookmarksPlugin.getInstance();
+
+export const plugin = {
+  init: async (ctx: Context, params: PluginInitParams) => {
+    return await pluginInstance.init(ctx, params);
+  },
+  query: async (ctx: Context, query: Query) => {
+    return await pluginInstance.query(ctx, query);
+  },
+  action: async (ctx: Context, result: any) => {
+    return await pluginInstance.action(ctx, result);
+  },
+  openUrl: async (ctx: Context, ...params: any[]) => {
+    return await pluginInstance.openUrl(ctx, ...params);
+  }
+};
