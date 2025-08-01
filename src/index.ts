@@ -40,6 +40,64 @@ class SmartBookmarksPlugin implements Plugin {
   private bookmarks: Bookmark[] = [];
   private pluginDir: string = "";
   private initialized: boolean = false;
+  private watcher: fs.FSWatcher | null = null;
+  private lastCheck: number = 0;
+  private readonly CHECK_INTERVAL = 30000; // 30 seconds
+
+  private async refreshBookmarks(): Promise<void> {
+    try {
+      // Load local bookmarks
+      let localBookmarks: Bookmark[] = [];
+      const localBookmarksPath = path.join(this.pluginDir, "bookmarks.json");
+      
+      if (fs.existsSync(localBookmarksPath)) {
+        const raw = fs.readFileSync(localBookmarksPath, "utf-8");
+        const parsed = JSON.parse(raw);
+        localBookmarks = Array.isArray(parsed) ? parsed : [];
+        console.log(`[SmartBookmarks] Refreshed ${localBookmarks.length} local bookmarks`);
+      }
+
+      // Load Edge bookmarks
+      let edgeBookmarks: Bookmark[] = [];
+      const edgeBookmarksPath = path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'Edge', 'User Data', 'Default', 'Bookmarks');
+      
+      if (fs.existsSync(edgeBookmarksPath)) {
+        const raw = fs.readFileSync(edgeBookmarksPath, "utf-8");
+        const parsed = JSON.parse(raw) as EdgeBookmarks;
+        edgeBookmarks = this.convertEdgeBookmarks(parsed);
+        console.log(`[SmartBookmarks] Refreshed ${edgeBookmarks.length} Edge bookmarks`);
+      }
+
+      // Update bookmarks
+      this.bookmarks = [...localBookmarks, ...edgeBookmarks];
+      this.lastCheck = Date.now();
+      console.log(`[SmartBookmarks] Total bookmarks after refresh: ${this.bookmarks.length}`);
+    } catch (error) {
+      console.error(`[SmartBookmarks] Error refreshing bookmarks:`, error);
+    }
+  }
+
+  private setupWatcher(): void {
+    try {
+      const edgeBookmarksPath = path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'Edge', 'User Data', 'Default', 'Bookmarks');
+      
+      if (this.watcher) {
+        this.watcher.close();
+      }
+
+      this.watcher = fs.watch(edgeBookmarksPath, async (eventType, filename) => {
+        if (filename) {
+          console.log(`[SmartBookmarks] Detected changes in Edge bookmarks`);
+          // Add a small delay to ensure the file is fully written
+          setTimeout(() => this.refreshBookmarks(), 1000);
+        }
+      });
+
+      console.log(`[SmartBookmarks] Started watching Edge bookmarks at: ${edgeBookmarksPath}`);
+    } catch (error) {
+      console.error(`[SmartBookmarks] Error setting up watcher:`, error);
+    }
+  }
 
   private convertEdgeBookmarks(edgeBookmarks: EdgeBookmarks): Bookmark[] {
     const results: Bookmark[] = [];
@@ -71,9 +129,17 @@ class SmartBookmarksPlugin implements Plugin {
     // Initialize with empty state to prevent null access
     this.bookmarks = [];
     this.initialized = false;
+    
+    // Clean up any existing watcher
+    if (this.watcher) {
+      this.watcher.close();
+      this.watcher = null;
+    }
+
     // Bind methods to this instance
     this.init = this.init.bind(this);
     this.query = this.query.bind(this);
+    this.refreshBookmarks = this.refreshBookmarks.bind(this);
     // Log the current instance state
     console.log(`[SmartBookmarks] Initial state:`, {
       hasInstance: !!SmartBookmarksPlugin.instance,
@@ -132,7 +198,11 @@ class SmartBookmarksPlugin implements Plugin {
       this.bookmarks = [...localBookmarks, ...edgeBookmarks];
       console.log(`[SmartBookmarks] Total bookmarks loaded: ${this.bookmarks.length}`);
       
+      // Set up file watcher for Edge bookmarks
+      this.setupWatcher();
+      
       this.initialized = true;
+      this.lastCheck = Date.now();
       console.log(`[SmartBookmarks] Initialization complete, initialized = ${this.initialized}`);
     } catch (error) {
       console.error(`[SmartBookmarks] Error in init:`, error);
@@ -144,11 +214,19 @@ class SmartBookmarksPlugin implements Plugin {
 
   async query(ctx: Context, query: Query): Promise<Result[]> {
     try {
+      // Check if we need to refresh bookmarks
+      const now = Date.now();
+      if (now - this.lastCheck > this.CHECK_INTERVAL) {
+        console.log(`[SmartBookmarks] Checking for bookmark updates...`);
+        await this.refreshBookmarks();
+      }
+
       console.log(`[SmartBookmarks] Query received: "${query.Search}"`);
       console.log(`[SmartBookmarks] Plugin state:`, {
         initialized: this.initialized,
         bookmarksLength: this.bookmarks.length,
-        pluginDir: this.pluginDir
+        pluginDir: this.pluginDir,
+        lastCheck: new Date(this.lastCheck).toISOString()
       });
 
       if (!this.initialized) {
