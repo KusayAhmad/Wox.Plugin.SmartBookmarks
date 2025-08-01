@@ -8,9 +8,10 @@ interface Bookmark {
   url: string;
   tags?: string;
   description?: string;
+  source?: string;
 }
 
-interface EdgeBookmark {
+interface ChromiumBookmark {
   date_added: string;
   date_last_used: string;
   guid: string;
@@ -18,20 +19,20 @@ interface EdgeBookmark {
   name: string;
   type: 'url' | 'folder';
   url?: string;
-  children?: EdgeBookmark[];
+  children?: ChromiumBookmark[];
 }
 
-interface EdgeBookmarks {
+interface ChromiumBookmarks {
   checksum: string;
   roots: {
     bookmark_bar: {
-      children: EdgeBookmark[];
+      children: ChromiumBookmark[];
     };
     other: {
-      children: EdgeBookmark[];
+      children: ChromiumBookmark[];
     };
     synced: {
-      children: EdgeBookmark[];
+      children: ChromiumBookmark[];
     };
   };
 }
@@ -43,73 +44,182 @@ class SmartBookmarksPlugin implements Plugin {
   private initialized: boolean = false;
   private watcher: fs.FSWatcher | null = null;
   private lastCheck: number = 0;
-  private readonly CHECK_INTERVAL = 30000; // 30 seconds
+  private readonly CHECK_INTERVAL = 30000; // Default 30 seconds
+  private settings: any = {};
+  private api: PublicAPI | null = null;
+
+  private getEnabledBrowsers(): Array<'edge' | 'chrome' | 'brave'> {
+    const enabledBrowsers = this.settings.enabledBrowsers || 'all';
+    
+    if (enabledBrowsers === 'all') {
+      return ['edge', 'chrome', 'brave'];
+    }
+    
+    return enabledBrowsers.split(',').map((b: string) => b.trim()) as Array<'edge' | 'chrome' | 'brave'>;
+  }
+
+  private getRefreshInterval(): number {
+    const interval = parseInt(this.settings.refreshInterval || '30');
+    return Math.max(interval, 10) * 1000; // Minimum 10 seconds, convert to milliseconds
+  }
+
+  private getMaxResults(): number {
+    return parseInt(this.settings.maxResults || '20');
+  }
+
+  private shouldIncludeLocalBookmarks(): boolean {
+    return this.settings.includeLocalBookmarks !== 'false';
+  }
+
+  private shouldShowBrowserSource(): boolean {
+    return this.settings.showBrowserSource !== 'false';
+  }
 
   private async refreshBookmarks(): Promise<void> {
     try {
-      // Load local bookmarks
-      let localBookmarks: Bookmark[] = [];
-      const localBookmarksPath = path.join(this.pluginDir, "bookmarks.json");
-      
-      if (fs.existsSync(localBookmarksPath)) {
-        const raw = fs.readFileSync(localBookmarksPath, "utf-8");
-        const parsed = JSON.parse(raw);
-        localBookmarks = Array.isArray(parsed) ? parsed : [];
-        console.log(`[SmartBookmarks] Refreshed ${localBookmarks.length} local bookmarks`);
+      let allBookmarks: Bookmark[] = [];
+
+      // Load local bookmarks if enabled
+      if (this.shouldIncludeLocalBookmarks()) {
+        const localBookmarksPath = path.join(this.pluginDir, "bookmarks.json");
+        
+        if (fs.existsSync(localBookmarksPath)) {
+          const raw = fs.readFileSync(localBookmarksPath, "utf-8");
+          const parsed = JSON.parse(raw);
+          const localBookmarks = Array.isArray(parsed) ? parsed : [];
+          allBookmarks = allBookmarks.concat(localBookmarks);
+          console.log(`[SmartBookmarks] Refreshed ${localBookmarks.length} local bookmarks`);
+        }
       }
 
-      // Load Edge bookmarks
-      let edgeBookmarks: Bookmark[] = [];
-      const edgeBookmarksPath = path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'Edge', 'User Data', 'Default', 'Bookmarks');
+      // Load browser bookmarks based on settings
+      const enabledBrowsers = this.getEnabledBrowsers();
+      let browserBookmarks: Bookmark[] = [];
       
-      if (fs.existsSync(edgeBookmarksPath)) {
-        const raw = fs.readFileSync(edgeBookmarksPath, "utf-8");
-        const parsed = JSON.parse(raw) as EdgeBookmarks;
-        edgeBookmarks = this.convertEdgeBookmarks(parsed);
-        console.log(`[SmartBookmarks] Refreshed ${edgeBookmarks.length} Edge bookmarks`);
+      for (const browser of enabledBrowsers) {
+        const bookmarks = await this.loadBrowserBookmarks(browser);
+        browserBookmarks = browserBookmarks.concat(bookmarks);
       }
+
+      allBookmarks = allBookmarks.concat(browserBookmarks);
 
       // Update bookmarks
-      this.bookmarks = [...localBookmarks, ...edgeBookmarks];
+      this.bookmarks = allBookmarks;
       this.lastCheck = Date.now();
       console.log(`[SmartBookmarks] Total bookmarks after refresh: ${this.bookmarks.length}`);
+      console.log(`[SmartBookmarks] Enabled browsers:`, enabledBrowsers);
     } catch (error) {
       console.error(`[SmartBookmarks] Error refreshing bookmarks:`, error);
     }
   }
 
+  private async loadBrowserBookmarks(browser: 'edge' | 'chrome' | 'brave'): Promise<Bookmark[]> {
+    try {
+      const bookmarksPath = this.getBrowserBookmarksPath(browser);
+      
+      if (!fs.existsSync(bookmarksPath)) {
+        console.log(`[SmartBookmarks] ${browser} bookmarks not found at: ${bookmarksPath}`);
+        return [];
+      }
+
+      const raw = fs.readFileSync(bookmarksPath, "utf-8");
+      const parsed = JSON.parse(raw) as ChromiumBookmarks;
+      const bookmarks = this.convertChromiumBookmarks(parsed, browser);
+      console.log(`[SmartBookmarks] Loaded ${bookmarks.length} ${browser} bookmarks`);
+      return bookmarks;
+    } catch (error) {
+      console.error(`[SmartBookmarks] Error loading ${browser} bookmarks:`, error);
+      return [];
+    }
+  }
+
+  private getBrowserBookmarksPath(browser: 'edge' | 'chrome' | 'brave'): string {
+    const localAppData = process.env.LOCALAPPDATA || '';
+    
+    switch (browser) {
+      case 'edge':
+        return path.join(localAppData, 'Microsoft', 'Edge', 'User Data', 'Default', 'Bookmarks');
+      case 'chrome':
+        return path.join(localAppData, 'Google', 'Chrome', 'User Data', 'Default', 'Bookmarks');
+      case 'brave':
+        return path.join(localAppData, 'BraveSoftware', 'Brave-Browser', 'User Data', 'Default', 'Bookmarks');
+      default:
+        return '';
+    }
+  }
+
   private setupWatcher(): void {
     try {
-      const edgeBookmarksPath = path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'Edge', 'User Data', 'Default', 'Bookmarks');
-      
       if (this.watcher) {
         this.watcher.close();
       }
 
-      this.watcher = fs.watch(edgeBookmarksPath, async (eventType, filename) => {
-        if (filename) {
-          console.log(`[SmartBookmarks] Detected changes in Edge bookmarks`);
-          // Add a small delay to ensure the file is fully written
-          setTimeout(() => this.refreshBookmarks(), 1000);
+      // Watch browser bookmark files based on enabled browsers
+      const enabledBrowsers = this.getEnabledBrowsers();
+      const watchedPaths: string[] = [];
+
+      enabledBrowsers.forEach(browser => {
+        const bookmarksPath = this.getBrowserBookmarksPath(browser);
+        if (fs.existsSync(bookmarksPath)) {
+          watchedPaths.push(bookmarksPath);
+          
+          // Create individual watchers for each browser
+          fs.watch(bookmarksPath, async (eventType, filename) => {
+            if (filename) {
+              console.log(`[SmartBookmarks] Detected changes in ${browser} bookmarks`);
+              // Add a small delay to ensure the file is fully written
+              setTimeout(() => this.refreshBookmarks(), 1000);
+            }
+          });
         }
       });
 
-      console.log(`[SmartBookmarks] Started watching Edge bookmarks at: ${edgeBookmarksPath}`);
+      console.log(`[SmartBookmarks] Started watching browser bookmarks:`, watchedPaths);
     } catch (error) {
       console.error(`[SmartBookmarks] Error setting up watcher:`, error);
     }
   }
 
-  private convertEdgeBookmarks(edgeBookmarks: EdgeBookmarks): Bookmark[] {
+  private convertChromiumBookmarks(chromiumBookmarks: ChromiumBookmarks, browserName: string): Bookmark[] {
     const results: Bookmark[] = [];
     
-    const processBookmarks = (items: EdgeBookmark[]) => {
+    const processBookmarks = (items: ChromiumBookmark[]) => {
+      for (const item of items) {
+        if (item.type === 'url') {
+          const dateAdded = parseInt(item.date_added) / 1000;
+          const lastUsed = item.date_last_used !== "0" ? new Date(parseInt(item.date_last_used) / 1000).toLocaleDateString() : "Never";
+          
+          results.push({
+            title: item.name,
+            url: item.url!,
+            description: `${browserName.charAt(0).toUpperCase() + browserName.slice(1)} • Added: ${new Date(dateAdded).toLocaleDateString()} • Last used: ${lastUsed}`,
+            source: browserName
+          });
+        } else if (item.type === 'folder' && item.children) {
+          processBookmarks(item.children);
+        }
+      }
+    };
+
+    // Process all bookmark sections
+    processBookmarks(chromiumBookmarks.roots.bookmark_bar.children);
+    processBookmarks(chromiumBookmarks.roots.other.children);
+    processBookmarks(chromiumBookmarks.roots.synced.children);
+
+    return results;
+  }
+
+  private convertEdgeBookmarks(edgeBookmarks: ChromiumBookmarks): Bookmark[] {
+    const results: Bookmark[] = [];
+    
+    const processBookmarks = (items: ChromiumBookmark[]) => {
       for (const item of items) {
         if (item.type === 'url') {
           results.push({
             title: item.name,
             url: item.url!,
-            description: `Edge Bookmark - ${new Date(parseInt(item.date_added) / 1000).toLocaleDateString()}`
+            description: `Edge Bookmark - ${new Date(parseInt(item.date_added) / 1000).toLocaleDateString()}`,
+            source: 'edge'
           });
         } else if (item.type === 'folder' && item.children) {
           processBookmarks(item.children);
@@ -179,6 +289,21 @@ class SmartBookmarksPlugin implements Plugin {
       }
       
       this.pluginDir = params.PluginDirectory;
+      this.api = params.API;
+      
+      // Load settings
+      if (this.api) {
+        this.settings = {
+          enabledBrowsers: await this.api.GetSetting(ctx, "enabledBrowsers") || "all",
+          refreshInterval: await this.api.GetSetting(ctx, "refreshInterval") || "30",
+          maxResults: await this.api.GetSetting(ctx, "maxResults") || "20",
+          includeLocalBookmarks: await this.api.GetSetting(ctx, "includeLocalBookmarks") || "true",
+          showBrowserSource: await this.api.GetSetting(ctx, "showBrowserSource") || "true"
+        };
+      }
+      
+      console.log(`[SmartBookmarks] Initializing with settings:`, this.settings);
+      
       const localBookmarksPath = path.join(this.pluginDir, "bookmarks.json");
       console.log(`[SmartBookmarks] Initializing with plugin directory: ${this.pluginDir}`);
       
@@ -192,25 +317,25 @@ class SmartBookmarksPlugin implements Plugin {
         console.log(`[SmartBookmarks] Loaded ${localBookmarks.length} local bookmarks`);
       }
 
-      // Load Edge bookmarks
-      let edgeBookmarks: Bookmark[] = [];
-      const edgeBookmarksPath = path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'Edge', 'User Data', 'Default', 'Bookmarks');
-      console.log(`[SmartBookmarks] Looking for Edge bookmarks at: ${edgeBookmarksPath}`);
+      // Load browser bookmarks
+      let browserBookmarks: Bookmark[] = [];
       
-      if (fs.existsSync(edgeBookmarksPath)) {
-        try {
-          const raw = fs.readFileSync(edgeBookmarksPath, "utf-8");
-          const parsed = JSON.parse(raw) as EdgeBookmarks;
-          edgeBookmarks = this.convertEdgeBookmarks(parsed);
-          console.log(`[SmartBookmarks] Loaded ${edgeBookmarks.length} Edge bookmarks`);
-        } catch (error) {
-          console.error(`[SmartBookmarks] Error loading Edge bookmarks:`, error);
-        }
-      }
+      // Edge bookmarks
+      const edgeBookmarks = await this.loadBrowserBookmarks('edge');
+      browserBookmarks = browserBookmarks.concat(edgeBookmarks);
+      
+      // Chrome bookmarks
+      const chromeBookmarks = await this.loadBrowserBookmarks('chrome');
+      browserBookmarks = browserBookmarks.concat(chromeBookmarks);
+      
+      // Brave bookmarks
+      const braveBookmarks = await this.loadBrowserBookmarks('brave');
+      browserBookmarks = browserBookmarks.concat(braveBookmarks);
 
       // Combine bookmarks from both sources
-      this.bookmarks = [...localBookmarks, ...edgeBookmarks];
+      this.bookmarks = [...localBookmarks, ...browserBookmarks];
       console.log(`[SmartBookmarks] Total bookmarks loaded: ${this.bookmarks.length}`);
+      console.log(`[SmartBookmarks] Sources: Local=${localBookmarks.length}, Edge=${edgeBookmarks.length}, Chrome=${chromeBookmarks.length}, Brave=${braveBookmarks.length}`);
       
       // Set up file watcher for Edge bookmarks
       this.setupWatcher();
@@ -228,9 +353,10 @@ class SmartBookmarksPlugin implements Plugin {
 
   async query(ctx: Context, query: Query): Promise<Result[]> {
     try {
-      // Check if we need to refresh bookmarks
+      // Check if we need to refresh bookmarks based on settings
+      const refreshInterval = this.getRefreshInterval();
       const now = Date.now();
-      if (now - this.lastCheck > this.CHECK_INTERVAL) {
+      if (now - this.lastCheck > refreshInterval) {
         console.log(`[SmartBookmarks] Checking for bookmark updates...`);
         await this.refreshBookmarks();
       }
@@ -240,7 +366,8 @@ class SmartBookmarksPlugin implements Plugin {
         initialized: this.initialized,
         bookmarksLength: this.bookmarks.length,
         pluginDir: this.pluginDir,
-        lastCheck: new Date(this.lastCheck).toISOString()
+        lastCheck: new Date(this.lastCheck).toISOString(),
+        settings: this.settings
       });
 
       if (!this.initialized) {
@@ -254,15 +381,22 @@ class SmartBookmarksPlugin implements Plugin {
       }
 
       const term = query.Search.toLowerCase();
+      const maxResults = this.getMaxResults();
+      const showBrowserSource = this.shouldShowBrowserSource();
+      
       return this.bookmarks
         .filter(bm =>
           bm.title.toLowerCase().includes(term) ||
-          (bm.tags && bm.tags.toLowerCase().includes(term))
+          (bm.tags && bm.tags.toLowerCase().includes(term)) ||
+          (bm.source && bm.source.toLowerCase().includes(term))
         )
+        .slice(0, maxResults)
         .map(bm => ({
           Title: bm.title,
-          SubTitle: bm.description || bm.url,
-          Icon: { ImageType: "relative", ImageData: "icon.png" },
+          SubTitle: showBrowserSource ? 
+            (bm.description || `${bm.url} ${bm.source ? `• ${bm.source.toUpperCase()}` : ''}`) :
+            (bm.description || bm.url),
+          Icon: { ImageType: "relative", ImageData: this.getBrowserIcon(bm.source) },
           Score: 100,
           Actions: [{
             Name: "Open in Browser",
@@ -296,6 +430,19 @@ class SmartBookmarksPlugin implements Plugin {
       this.openUrlDirectly(url);
     } catch (error) {
       console.error(`[SmartBookmarks] Error in openUrl:`, error);
+    }
+  }
+
+  private getBrowserIcon(source?: string): string {
+    switch (source) {
+      case 'edge':
+        return 'icon.png'; // يمكن إضافة أيقونة Edge مخصصة
+      case 'chrome':
+        return 'icon.png'; // يمكن إضافة أيقونة Chrome مخصصة
+      case 'brave':
+        return 'icon.png'; // يمكن إضافة أيقونة Brave مخصصة
+      default:
+        return 'icon.png';
     }
   }
 

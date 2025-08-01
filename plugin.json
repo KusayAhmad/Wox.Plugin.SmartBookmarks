@@ -5,15 +5,99 @@
     "bookmark"
   ],
   "Name": "Smart Bookmarks (TS)",
-  "Description": "Smart Bookmarks plugin for Wox",
+  "Description": "Smart Bookmarks plugin for Wox - Supports Edge, Chrome, Brave browsers and local bookmarks",
   "Author": "Kusay Ahmad",
-  "Version": "0.0.3",
+  "Version": "0.1.0",
   "MinWoxVersion": "2.0.0",
   "Runtime": "Nodejs",
   "Website": "https://github.com/KusayAhmad/Wox.Plugin.SmartBookmarks",
   "Entry": "index.js",
   "Icon": "relative:icon.png",
-  "SupportedOS": ["windows"],
-  "Features": [],
-  "SettingDefinitions": []
+  "SupportedOS": [
+    "windows"
+  ],
+  "Features": [
+    {
+      "Name": "debounce",
+      "Params": {
+        "intervalMs": "200"
+      }
+    }
+  ],
+  "SettingDefinitions": [
+    {
+      "Type": "select",
+      "Value": {
+        "Key": "enabledBrowsers",
+        "Label": "Enabled Browsers",
+        "DefaultValue": "all",
+        "Options": [
+          {
+            "Label": "All browsers",
+            "Value": "all"
+          },
+          {
+            "Label": "Edge only",
+            "Value": "edge"
+          },
+          {
+            "Label": "Chrome only",
+            "Value": "chrome"
+          },
+          {
+            "Label": "Brave only",
+            "Value": "brave"
+          },
+          {
+            "Label": "Edge + Chrome",
+            "Value": "edge,chrome"
+          },
+          {
+            "Label": "Edge + Brave",
+            "Value": "edge,brave"
+          },
+          {
+            "Label": "Chrome + Brave",
+            "Value": "chrome,brave"
+          }
+        ]
+      }
+    },
+    {
+      "Type": "textbox",
+      "Value": {
+        "Key": "refreshInterval",
+        "Label": "Refresh Interval (seconds)",
+        "Tooltip": "How often to check for bookmark updates (minimum 10 seconds)",
+        "DefaultValue": "30"
+      }
+    },
+    {
+      "Type": "textbox",
+      "Value": {
+        "Key": "maxResults",
+        "Label": "Maximum Results",
+        "Tooltip": "Maximum number of bookmarks to show in search results",
+        "DefaultValue": "20"
+      }
+    },
+    {
+      "Type": "checkbox",
+      "Value": {
+        "Key": "includeLocalBookmarks",
+        "Label": "Include Local Bookmarks",
+        "Tooltip": "Include bookmarks from the local bookmarks.json file",
+        "DefaultValue": "true"
+      }
+    },
+    {
+      "Type": "checkbox",
+      "Value": {
+        "Key": "showBrowserSource",
+        "Label": "Show Browser Source",
+        "Tooltip": "Display which browser each bookmark comes from",
+        "DefaultValue": "true"
+      }
+    }
+  ]
 }
