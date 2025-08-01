@@ -1,0 +1,19 @@
+{
+  "Id": "smart-bookmarks-ts",
+  "TriggerKeywords": [
+    "bm",
+    "bookmark"
+  ],
+  "Name": "Smart Bookmarks (TS)",
+  "Description": "Smart Bookmarks plugin for Wox",
+  "Author": "Kusay Ahmad",
+  "Version": "3.0.0",
+  "MinWoxVersion": "2.0.0",
+  "Runtime": "Nodejs",
+  "Website": "https://github.com/Wox-launcher/",
+  "Entry": "index.js",
+  "Icon": "relative:icon.png",
+  "SupportedOS": ["windows"],
+  "Features": [],
+  "SettingDefinitions": []
+}

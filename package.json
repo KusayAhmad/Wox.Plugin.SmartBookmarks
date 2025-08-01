@@ -1,0 +1,16 @@
+{
+  "name": "smart-bookmarks-ts",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsc --watch",
+    "build": "tsc && powershell -Command \"Write-Host 'Copying files to dist...'; Copy-Item plugin.json,icon.png,bookmarks.json -Destination dist\\ -Force -Verbose; if ($?) { Write-Host 'Files copied successfully' } else { Write-Host 'Failed to copy some files' -ForegroundColor Red }\""
+  },
+  "dependencies": {
+    "@wox-launcher/wox-plugin": "^0.0.85"
+  },
+  "devDependencies": {
+    "@types/node": "^24.1.0",
+    "typescript": "^5.0.0"
+  }
+}
