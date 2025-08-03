@@ -75,6 +75,28 @@ class SmartBookmarksPlugin implements Plugin {
     return this.settings.showBrowserSource !== 'false';
   }
 
+  private async loadSettings(ctx: Context): Promise<void> {
+    if (this.api) {
+      this.settings = {
+        enabledBrowsers: await this.api.GetSetting(ctx, "enabledBrowsers") || "all",
+        refreshInterval: await this.api.GetSetting(ctx, "refreshInterval") || "30",
+        maxResults: await this.api.GetSetting(ctx, "maxResults") || "20",
+        includeLocalBookmarks: await this.api.GetSetting(ctx, "includeLocalBookmarks") || "true",
+        showBrowserSource: await this.api.GetSetting(ctx, "showBrowserSource") || "true"
+      };
+    } else {
+      // Fallback to default settings if API is not available
+      this.settings = {
+        enabledBrowsers: "all",
+        refreshInterval: "30",
+        maxResults: "20",
+        includeLocalBookmarks: "true",
+        showBrowserSource: "true"
+      };
+    }
+    console.log(`[SmartBookmarks] Settings loaded:`, this.settings);
+  }
+
   private async refreshBookmarks(): Promise<void> {
     try {
       let allBookmarks: Bookmark[] = [];
@@ -292,24 +314,7 @@ class SmartBookmarksPlugin implements Plugin {
       this.api = params.API;
       
       // Load settings
-      if (this.api) {
-        this.settings = {
-          enabledBrowsers: await this.api.GetSetting(ctx, "enabledBrowsers") || "all",
-          refreshInterval: await this.api.GetSetting(ctx, "refreshInterval") || "30",
-          maxResults: await this.api.GetSetting(ctx, "maxResults") || "20",
-          includeLocalBookmarks: await this.api.GetSetting(ctx, "includeLocalBookmarks") || "true",
-          showBrowserSource: await this.api.GetSetting(ctx, "showBrowserSource") || "true"
-        };
-      } else {
-        // Fallback to default settings if API is not available
-        this.settings = {
-          enabledBrowsers: "all",
-          refreshInterval: "30",
-          maxResults: "20",
-          includeLocalBookmarks: "true",
-          showBrowserSource: "true"
-        };
-      }
+      await this.loadSettings(ctx);
       
       console.log(`[SmartBookmarks] Initializing with settings:`, this.settings);
       
@@ -362,6 +367,9 @@ class SmartBookmarksPlugin implements Plugin {
 
   async query(ctx: Context, query: Query): Promise<Result[]> {
     try {
+      // Reload settings every time to get latest changes
+      await this.loadSettings(ctx);
+      
       // Check if we need to refresh bookmarks based on settings
       const refreshInterval = this.getRefreshInterval();
       const now = Date.now();
@@ -392,6 +400,27 @@ class SmartBookmarksPlugin implements Plugin {
       const term = query.Search.toLowerCase();
       const maxResults = this.getMaxResults();
       const showBrowserSource = this.shouldShowBrowserSource();
+      
+      // Special commands
+      if (term === 'reload' || term === 'refresh') {
+        await this.loadSettings(ctx);
+        await this.refreshBookmarks();
+        return [{
+          Title: "Settings and Bookmarks Reloaded",
+          SubTitle: `Loaded ${this.bookmarks.length} bookmarks with current settings`,
+          Icon: { ImageType: "relative", ImageData: "icon.png" },
+          Score: 1000
+        }];
+      }
+      
+      if (term === 'settings' || term === 'config') {
+        return [{
+          Title: "Current Settings",
+          SubTitle: `Browsers: ${this.settings.enabledBrowsers} | Interval: ${this.settings.refreshInterval}s | Max: ${this.settings.maxResults}`,
+          Icon: { ImageType: "relative", ImageData: "icon.png" },
+          Score: 1000
+        }];
+      }
       
       return this.bookmarks
         .filter(bm =>
@@ -445,11 +474,11 @@ class SmartBookmarksPlugin implements Plugin {
   private getBrowserIcon(source?: string): string {
     switch (source) {
       case 'edge':
-        return 'icon.png'; // يمكن إضافة أيقونة Edge مخصصة
+        return 'icon.png';
       case 'chrome':
-        return 'icon.png'; // يمكن إضافة أيقونة Chrome مخصصة
+        return 'icon.png';
       case 'brave':
-        return 'icon.png'; // يمكن إضافة أيقونة Brave مخصصة
+        return 'icon.png';
       default:
         return 'icon.png';
     }
