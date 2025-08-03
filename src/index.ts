@@ -186,7 +186,8 @@ class SmartBookmarksPlugin implements Plugin {
           const aLastUsed = a.lastUsed && a.lastUsed !== "0" && a.lastUsed !== "Never" ? new Date(a.lastUsed).getTime() : 0;
           const bLastUsed = b.lastUsed && b.lastUsed !== "0" && b.lastUsed !== "Never" ? new Date(b.lastUsed).getTime() : 0;
           return bLastUsed - aLastUsed;
-        });
+        })
+        .slice(0, this.getMaxResults());
     }
 
     const term = searchTerm.toLowerCase().trim();
@@ -431,6 +432,8 @@ class SmartBookmarksPlugin implements Plugin {
     this.refreshBookmarks = this.refreshBookmarks.bind(this);
     this.openUrl = this.openUrl.bind(this);
     this.action = this.action.bind(this);
+    this.copyUrlToClipboard = this.copyUrlToClipboard.bind(this);
+    this.openUrlInIncognito = this.openUrlInIncognito.bind(this);
     
     console.log(`[SmartBookmarks] Methods bound:`, {
       init: typeof this.init,
@@ -554,6 +557,21 @@ class SmartBookmarksPlugin implements Plugin {
       const maxResults = this.getMaxResults();
       const showBrowserSource = this.shouldShowBrowserSource();
       
+      // Handle action-specific commands
+      let searchTerm = query.Search;
+      let actionType = 'open';
+      
+      if (term.startsWith('o ')) {
+        actionType = 'open';
+        searchTerm = query.Search.substring(2); // Remove 'o '
+      } else if (term.startsWith('c ')) {
+        actionType = 'copy';
+        searchTerm = query.Search.substring(2); // Remove 'c '
+      } else if (term.startsWith('i ')) {
+        actionType = 'incognito';
+        searchTerm = query.Search.substring(2); // Remove 'i '
+      }
+      
       // Special commands
       if (term === 'reload' || term === 'refresh') {
         await this.loadSettings(ctx);
@@ -578,30 +596,76 @@ class SmartBookmarksPlugin implements Plugin {
       if (term === 'help' || term === '?') {
         return [{
           Title: "Smart Bookmarks Help",
-          SubTitle: "Commands: reload, settings, help | Search: title, url, tags, source | Smart sorting enabled",
+          SubTitle: "Usage: 'bm [term]' = Open | 'bm o [term]' = Open | 'bm c [term]' = Copy | 'bm i [term]' = Incognito",
+          Icon: { ImageType: "relative", ImageData: "icon.png" },
+          Score: 1000
+        }];
+      }
+      
+      // Show usage examples if only action prefix is entered
+      if (term === 'o' || term === 'c' || term === 'i') {
+        const actionNames = {
+          'o': '🌐 Open in Browser',
+          'c': '📋 Copy URL',
+          'i': '🕵️ Open in Incognito'
+        };
+        
+        return [{
+          Title: `${actionNames[term as keyof typeof actionNames]} - Enter search term`,
+          SubTitle: `Type 'bm ${term} [search term]' to search and ${actionNames[term as keyof typeof actionNames].toLowerCase()}`,
           Icon: { ImageType: "relative", ImageData: "icon.png" },
           Score: 1000
         }];
       }
       
       // استخدام البحث الذكي الجديد
-      const filteredBookmarks = this.smartSearch(query.Search);
+      const filteredBookmarks = this.smartSearch(searchTerm);
+      
+      // Get action icon and description
+      const getActionInfo = (action: string) => {
+        switch (action) {
+          case 'copy':
+            return { icon: '📋', desc: 'Copy URL' };
+          case 'incognito':
+            return { icon: '🕵️', desc: 'Open in Incognito' };
+          default:
+            return { icon: '🌐', desc: 'Open in Browser' };
+        }
+      };
+      
+      const actionInfo = getActionInfo(actionType);
       
       return filteredBookmarks
         .map((bm, index) => ({
-          Title: bm.title,
+          Title: `${actionInfo.icon} ${bm.title}`,
           SubTitle: showBrowserSource ? 
-            (bm.description || `${bm.url} ${bm.source ? `• ${bm.source.toUpperCase()}` : ''}`) :
-            (bm.description || bm.url),
+            (bm.description || `${actionInfo.desc}: ${bm.url} ${bm.source ? `• ${bm.source.toUpperCase()}` : ''}`) :
+            (bm.description || `${actionInfo.desc}: ${bm.url}`),
           Icon: { ImageType: "relative", ImageData: this.getBrowserIcon(bm.source) },
-          Score: 1000 - index, // ترتيب النتائج
+          Score: 1000 - index,
+          ContextData: JSON.stringify({
+            url: bm.url,
+            title: bm.title,
+            action: actionType
+          }),
           Actions: [{
-            Name: "Open in Browser",
+            Name: actionInfo.desc,
             Action: async (context: any) => {
-              console.log(`[SmartBookmarks] Action triggered for URL: ${bm.url}`);
-              // تحديث إحصائيات الاستخدام
-              this.updateBookmarkStats(bm);
-              this.openUrlDirectly(bm.url);
+              console.log(`[SmartBookmarks] ${actionInfo.desc}: ${bm.url}`);
+              
+              switch (actionType) {
+                case 'copy':
+                  this.copyUrlToClipboard(bm.url);
+                  break;
+                case 'incognito':
+                  this.updateBookmarkStats(bm);
+                  this.openUrlInIncognito(bm.url);
+                  break;
+                default:
+                  this.updateBookmarkStats(bm);
+                  this.openUrlDirectly(bm.url);
+                  break;
+              }
             }
           }]
         }));
@@ -680,28 +744,119 @@ class SmartBookmarksPlugin implements Plugin {
     }
   }
 
-  async action(ctx: Context, result: any): Promise<void> {
+  private copyUrlToClipboard(url: string): void {
     try {
-      const url = result.ContextData;
-      console.log(`[SmartBookmarks] Action called with URL: ${url}`);
+      console.log(`[SmartBookmarks] Copying URL to clipboard: ${url}`);
       
-      if (!url) {
-        console.error(`[SmartBookmarks] No URL in ContextData`);
-        return;
-      }
+      // Use PowerShell to copy URL to clipboard (more reliable than clip)
+      const powershellCommand = `powershell -Command "Set-Clipboard -Value '${url.replace(/'/g, "''")}'"`;
       
-      // Use Windows 'start' command to open URL in default browser
-      exec(`start "" "${url}"`, (error, stdout, stderr) => {
+      exec(powershellCommand, (error, stdout, stderr) => {
         if (error) {
-          console.error(`[SmartBookmarks] Error opening URL: ${error.message}`);
+          console.error(`[SmartBookmarks] Error copying URL: ${error.message}`);
+          // Fallback to clip command
+          exec(`echo|set /p="${url}"|clip`, (error2) => {
+            if (error2) {
+              console.error(`[SmartBookmarks] Fallback copy also failed: ${error2.message}`);
+            } else {
+              console.log(`[SmartBookmarks] Successfully copied URL to clipboard (fallback): ${url}`);
+            }
+          });
           return;
         }
         if (stderr) {
           console.error(`[SmartBookmarks] stderr: ${stderr}`);
           return;
         }
-        console.log(`[SmartBookmarks] Successfully opened URL: ${url}`);
+        console.log(`[SmartBookmarks] Successfully copied URL to clipboard: ${url}`);
       });
+    } catch (error) {
+      console.error(`[SmartBookmarks] Error in copyUrlToClipboard:`, error);
+    }
+  }
+
+  private openUrlInIncognito(url: string): void {
+    try {
+      console.log(`[SmartBookmarks] Opening URL in incognito: ${url}`);
+      
+      // Try different browsers for incognito mode
+      const browsers = [
+        { name: 'Chrome', command: `start chrome --incognito "${url}"` },
+        { name: 'Edge', command: `start msedge --inprivate "${url}"` },
+        { name: 'Firefox', command: `start firefox --private-window "${url}"` },
+        { name: 'Brave', command: `start brave --incognito "${url}"` }
+      ];
+
+      // Try Chrome first (most common)
+      exec(browsers[0].command, (error, stdout, stderr) => {
+        if (error) {
+          console.log(`[SmartBookmarks] Chrome not available, trying Edge...`);
+          // If Chrome fails, try Edge
+          exec(browsers[1].command, (error2, stdout2, stderr2) => {
+            if (error2) {
+              console.log(`[SmartBookmarks] Edge not available, falling back to default browser...`);
+              // If both fail, fall back to default browser
+              this.openUrlDirectly(url);
+            } else {
+              console.log(`[SmartBookmarks] Successfully opened URL in Edge incognito: ${url}`);
+            }
+          });
+        } else {
+          console.log(`[SmartBookmarks] Successfully opened URL in Chrome incognito: ${url}`);
+        }
+      });
+    } catch (error) {
+      console.error(`[SmartBookmarks] Error in openUrlInIncognito:`, error);
+    }
+  }
+
+  async action(ctx: Context, result: any): Promise<void> {
+    try {
+      console.log(`[SmartBookmarks] Action called with result:`, result);
+      
+      let url = '';
+      let actionType = 'open';
+      
+      // Try to parse ContextData if it exists
+      if (result.ContextData) {
+        try {
+          const contextData = JSON.parse(result.ContextData);
+          url = contextData.url;
+          actionType = contextData.action || 'open';
+        } catch (e) {
+          // If parsing fails, treat ContextData as URL directly
+          url = result.ContextData;
+        }
+      }
+      
+      if (!url) {
+        console.error(`[SmartBookmarks] No URL found in result`);
+        return;
+      }
+      
+      // Find the bookmark to update stats
+      const bookmark = this.bookmarks.find(bm => bm.url === url);
+      
+      // Execute the appropriate action based on type
+      console.log(`[SmartBookmarks] Executing action: ${actionType} for URL: ${url}`);
+      
+      switch (actionType) {
+        case 'copy':
+          console.log(`[SmartBookmarks] Copying URL: ${url}`);
+          this.copyUrlToClipboard(url);
+          break;
+        case 'incognito':
+          console.log(`[SmartBookmarks] Opening in incognito: ${url}`);
+          if (bookmark) this.updateBookmarkStats(bookmark);
+          this.openUrlInIncognito(url);
+          break;
+        case 'open':
+        default:
+          console.log(`[SmartBookmarks] Opening in browser: ${url}`);
+          if (bookmark) this.updateBookmarkStats(bookmark);
+          this.openUrlDirectly(url);
+          break;
+      }
     } catch (error) {
       console.error(`[SmartBookmarks] Error in action:`, error);
     }
