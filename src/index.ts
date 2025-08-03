@@ -9,6 +9,10 @@ interface Bookmark {
   tags?: string;
   description?: string;
   source?: string;
+  visitCount?: number;
+  lastUsed?: string;
+  dateAdded?: string;
+  folder?: string;
 }
 
 interface ChromiumBookmark {
@@ -65,6 +69,139 @@ class SmartBookmarksPlugin implements Plugin {
 
   private getMaxResults(): number {
     return parseInt(this.settings.maxResults || '20');
+  }
+
+  private calculateScore(bookmark: Bookmark, searchTerm: string): number {
+    if (!searchTerm || searchTerm.trim() === '') return 50;
+    
+    const term = searchTerm.toLowerCase().trim();
+    const title = bookmark.title.toLowerCase();
+    const url = bookmark.url.toLowerCase();
+    const description = (bookmark.description || '').toLowerCase();
+    const tags = (bookmark.tags || '').toLowerCase();
+    const source = (bookmark.source || '').toLowerCase();
+    
+    let score = 0;
+
+    // 🔥 مكافأة خاصة للمتصفح المُحدد في البحث
+    const browserSearchBonus = this.getBrowserSearchBonus(term, source);
+    score += browserSearchBonus;
+
+    // 🎯 مطابقة دقيقة (أعلى نقاط)
+    if (title === term) score += 1000;
+    else if (title.includes(term)) {
+      // مطابقة في بداية العنوان
+      if (title.startsWith(term)) score += 800;
+      // مطابقة كلمة كاملة
+      else if (title.includes(` ${term} `) || title.includes(` ${term}`)) score += 600;
+      // مطابقة جزئية
+      else score += 400;
+    }
+
+    // 🔗 مطابقة في URL
+    if (url.includes(term)) {
+      // Domain matching (أولوية عالية)
+      const domain = url.replace(/^https?:\/\//, '').split('/')[0];
+      if (domain.includes(term)) score += 300;
+      else score += 150;
+    }
+
+    // 📝 مطابقة في الوصف
+    if (description.includes(term)) score += 200;
+
+    // 🏷️ مطابقة في التاجات
+    if (tags.includes(term)) score += 250;
+
+    // 🌐 مطابقة في مصدر المتصفح
+    if (source.includes(term)) score += 100;
+
+    // 📊 عوامل إضافية للفرز الذكي
+    
+    // تكرار الاستخدام
+    const visitCount = bookmark.visitCount || 0;
+    if (visitCount > 0) {
+      score += Math.min(visitCount * 2, 100); // حد أقصى 100 نقطة للزيارات
+    }
+
+    // حداثة الاستخدام
+    if (bookmark.lastUsed && bookmark.lastUsed !== "0" && bookmark.lastUsed !== "Never") {
+      try {
+        const lastUsedDate = new Date(bookmark.lastUsed);
+        const daysSinceUsed = (Date.now() - lastUsedDate.getTime()) / (1000 * 60 * 60 * 24);
+        
+        if (daysSinceUsed < 1) score += 80;        // استُخدم اليوم
+        else if (daysSinceUsed < 7) score += 60;   // استُخدم هذا الأسبوع
+        else if (daysSinceUsed < 30) score += 40;  // استُخدم هذا الشهر
+        else if (daysSinceUsed < 90) score += 20;  // استُخدم خلال 3 أشهر
+      } catch (e) {
+        // تجاهل خطأ تحليل التاريخ
+      }
+    }
+
+    // طول العنوان (العناوين القصيرة أفضل عادة)
+    if (title.length < 30) score += 10;
+    else if (title.length > 100) score -= 10;
+
+    // نوع الموقع (مواقع مشهورة)
+    const popularSites = ['github', 'stackoverflow', 'google', 'youtube', 'facebook', 'twitter', 'linkedin'];
+    for (const site of popularSites) {
+      if (url.includes(site)) {
+        score += 30;
+        break;
+      }
+    }
+
+    // 🚫 تقليل أولوية البوكمارك المحلية إذا كان البحث يستهدف متصفح معين
+    if (!bookmark.source && this.isSearchingForSpecificBrowser(term)) {
+      score = Math.max(score - 500, 1); // تقليل كبير في النقاط
+    }
+
+    return Math.max(score, 1); // ضمان وجود نقطة واحدة على الأقل
+  }
+
+  private getBrowserSearchBonus(searchTerm: string, bookmarkSource: string): number {
+    const term = searchTerm.toLowerCase();
+    const source = bookmarkSource.toLowerCase();
+    
+    // إذا كان البحث يتضمن اسم متصفح والبوكمارك من نفس المتصفح
+    if ((term.includes('chrome') && source === 'chrome') ||
+        (term.includes('edge') && source === 'edge') ||
+        (term.includes('brave') && source === 'brave')) {
+      return 2000; // مكافأة كبيرة جداً
+    }
+    
+    return 0;
+  }
+
+  private isSearchingForSpecificBrowser(searchTerm: string): boolean {
+    const term = searchTerm.toLowerCase();
+    return term.includes('chrome') || term.includes('edge') || term.includes('brave');
+  }
+
+  private smartSearch(searchTerm: string): Bookmark[] {
+    if (!searchTerm || searchTerm.trim() === '') {
+      // إذا لم يكن هناك بحث، اعرض الأحدث استخداماً
+      return this.bookmarks
+        .sort((a, b) => {
+          const aLastUsed = a.lastUsed && a.lastUsed !== "0" && a.lastUsed !== "Never" ? new Date(a.lastUsed).getTime() : 0;
+          const bLastUsed = b.lastUsed && b.lastUsed !== "0" && b.lastUsed !== "Never" ? new Date(b.lastUsed).getTime() : 0;
+          return bLastUsed - aLastUsed;
+        });
+    }
+
+    const term = searchTerm.toLowerCase().trim();
+    const maxResults = this.getMaxResults();
+
+    // تطبيق البحث والفرز
+    return this.bookmarks
+      .map(bookmark => ({
+        bookmark,
+        score: this.calculateScore(bookmark, term)
+      }))
+      .filter(item => item.score > 0) // فقط النتائج ذات النقاط الإيجابية
+      .sort((a, b) => b.score - a.score) // فرز تنازلي حسب النقاط
+      .slice(0, maxResults)
+      .map(item => item.bookmark);
   }
 
   private shouldIncludeLocalBookmarks(): boolean {
@@ -205,28 +342,44 @@ class SmartBookmarksPlugin implements Plugin {
   private convertChromiumBookmarks(chromiumBookmarks: ChromiumBookmarks, browserName: string): Bookmark[] {
     const results: Bookmark[] = [];
     
-    const processBookmarks = (items: ChromiumBookmark[]) => {
+    const processBookmarks = (items: ChromiumBookmark[], folderPath: string = '') => {
       for (const item of items) {
         if (item.type === 'url') {
           const dateAdded = parseInt(item.date_added) / 1000;
-          const lastUsed = item.date_last_used !== "0" ? new Date(parseInt(item.date_last_used) / 1000).toLocaleDateString() : "Never";
+          const lastUsedTimestamp = item.date_last_used !== "0" ? parseInt(item.date_last_used) / 1000 : 0;
+          const lastUsed = lastUsedTimestamp > 0 ? new Date(lastUsedTimestamp).toISOString() : "Never";
           
+          // استخراج اسم الدومين من URL
+          let domain = '';
+          try {
+            const urlObj = new URL(item.url!);
+            domain = urlObj.hostname.replace('www.', '');
+          } catch (e) {
+            domain = item.url!.split('/')[2] || '';
+          }
+
           results.push({
             title: item.name,
             url: item.url!,
-            description: `${browserName.charAt(0).toUpperCase() + browserName.slice(1)} • Added: ${new Date(dateAdded).toLocaleDateString()} • Last used: ${lastUsed}`,
-            source: browserName
+            description: `${browserName.charAt(0).toUpperCase() + browserName.slice(1)} • ${domain} • Added: ${new Date(dateAdded).toLocaleDateString()} • Last used: ${lastUsed === "Never" ? "Never" : new Date(lastUsedTimestamp * 1000).toLocaleDateString()}`,
+            source: browserName,
+            visitCount: 0, // Chrome لا يحفظ عدد الزيارات في البوكمارك
+            lastUsed: lastUsed,
+            dateAdded: new Date(dateAdded).toISOString(),
+            folder: folderPath,
+            tags: `${browserName} ${domain} ${folderPath}`.toLowerCase()
           });
         } else if (item.type === 'folder' && item.children) {
-          processBookmarks(item.children);
+          const newFolderPath = folderPath ? `${folderPath}/${item.name}` : item.name;
+          processBookmarks(item.children, newFolderPath);
         }
       }
     };
 
     // Process all bookmark sections
-    processBookmarks(chromiumBookmarks.roots.bookmark_bar.children);
-    processBookmarks(chromiumBookmarks.roots.other.children);
-    processBookmarks(chromiumBookmarks.roots.synced.children);
+    processBookmarks(chromiumBookmarks.roots.bookmark_bar.children, 'Bookmarks Bar');
+    processBookmarks(chromiumBookmarks.roots.other.children, 'Other Bookmarks');
+    processBookmarks(chromiumBookmarks.roots.synced.children, 'Mobile Bookmarks');
 
     return results;
   }
@@ -421,25 +574,33 @@ class SmartBookmarksPlugin implements Plugin {
           Score: 1000
         }];
       }
+
+      if (term === 'help' || term === '?') {
+        return [{
+          Title: "Smart Bookmarks Help",
+          SubTitle: "Commands: reload, settings, help | Search: title, url, tags, source | Smart sorting enabled",
+          Icon: { ImageType: "relative", ImageData: "icon.png" },
+          Score: 1000
+        }];
+      }
       
-      return this.bookmarks
-        .filter(bm =>
-          bm.title.toLowerCase().includes(term) ||
-          (bm.tags && bm.tags.toLowerCase().includes(term)) ||
-          (bm.source && bm.source.toLowerCase().includes(term))
-        )
-        .slice(0, maxResults)
-        .map(bm => ({
+      // استخدام البحث الذكي الجديد
+      const filteredBookmarks = this.smartSearch(query.Search);
+      
+      return filteredBookmarks
+        .map((bm, index) => ({
           Title: bm.title,
           SubTitle: showBrowserSource ? 
             (bm.description || `${bm.url} ${bm.source ? `• ${bm.source.toUpperCase()}` : ''}`) :
             (bm.description || bm.url),
           Icon: { ImageType: "relative", ImageData: this.getBrowserIcon(bm.source) },
-          Score: 100,
+          Score: 1000 - index, // ترتيب النتائج
           Actions: [{
             Name: "Open in Browser",
             Action: async (context: any) => {
               console.log(`[SmartBookmarks] Action triggered for URL: ${bm.url}`);
+              // تحديث إحصائيات الاستخدام
+              this.updateBookmarkStats(bm);
               this.openUrlDirectly(bm.url);
             }
           }]
@@ -468,6 +629,20 @@ class SmartBookmarksPlugin implements Plugin {
       this.openUrlDirectly(url);
     } catch (error) {
       console.error(`[SmartBookmarks] Error in openUrl:`, error);
+    }
+  }
+
+  private updateBookmarkStats(bookmark: Bookmark): void {
+    try {
+      // تحديث آخر استخدام
+      bookmark.lastUsed = new Date().toISOString();
+      
+      // زيادة عدد الزيارات
+      bookmark.visitCount = (bookmark.visitCount || 0) + 1;
+      
+      console.log(`[SmartBookmarks] Updated stats for: ${bookmark.title} (visits: ${bookmark.visitCount})`);
+    } catch (error) {
+      console.error(`[SmartBookmarks] Error updating bookmark stats:`, error);
     }
   }
 
