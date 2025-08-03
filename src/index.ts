@@ -232,6 +232,7 @@ class SmartBookmarksPlugin implements Plugin {
         showBrowserSource: "true"
       };
     }
+    
     console.log(`[SmartBookmarks] Settings loaded:`, this.settings);
   }
 
@@ -346,9 +347,10 @@ class SmartBookmarksPlugin implements Plugin {
     const processBookmarks = (items: ChromiumBookmark[], folderPath: string = '') => {
       for (const item of items) {
         if (item.type === 'url') {
-          const dateAdded = parseInt(item.date_added) / 1000;
-          const lastUsedTimestamp = item.date_last_used !== "0" ? parseInt(item.date_last_used) / 1000 : 0;
-          const lastUsed = lastUsedTimestamp > 0 ? new Date(lastUsedTimestamp).toISOString() : "Never";
+          const chromeEpochDiff = 11644473600;
+          const dateAddedMs = parseInt(item.date_added) / 1000 - chromeEpochDiff * 1000;
+          const lastUsedMs = item.date_last_used !== "0" ? (parseInt(item.date_last_used) / 1000 - chromeEpochDiff * 1000) : 0;
+          const lastUsed = lastUsedMs > 0 ? new Date(lastUsedMs).toISOString() : "Never";
           
           // استخراج اسم الدومين من URL
           let domain = '';
@@ -362,11 +364,11 @@ class SmartBookmarksPlugin implements Plugin {
           results.push({
             title: item.name,
             url: item.url!,
-            description: `${browserName.charAt(0).toUpperCase() + browserName.slice(1)} • ${domain} • Added: ${new Date(dateAdded).toLocaleDateString()} • Last used: ${lastUsed === "Never" ? "Never" : new Date(lastUsedTimestamp * 1000).toLocaleDateString()}`,
+            description: `${browserName.charAt(0).toUpperCase() + browserName.slice(1)} • ${domain} • Added: ${new Date(dateAddedMs).toLocaleDateString()} • Last used: ${lastUsed === "Never" ? "Never" : new Date(lastUsedMs).toLocaleDateString()}`,
             source: browserName,
             visitCount: 0, // Chrome لا يحفظ عدد الزيارات في البوكمارك
             lastUsed: lastUsed,
-            dateAdded: new Date(dateAdded).toISOString(),
+            dateAdded: new Date(dateAddedMs).toISOString(),
             folder: folderPath,
             tags: `${browserName} ${domain} ${folderPath}`.toLowerCase()
           });
