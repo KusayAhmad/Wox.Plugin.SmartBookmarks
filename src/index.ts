@@ -614,8 +614,8 @@ class SmartBookmarksPlugin implements Plugin {
       const folderSearchQuery = query.Search.toLowerCase();
 
       // Handle folder-specific commands
-      if (folderSearchQuery.startsWith('folder:')) {
-        const folderTerm = folderSearchQuery.substring(7).trim();
+      if (folderSearchQuery.startsWith('f:')) {
+        const folderTerm = folderSearchQuery.substring(2).trim();
 
         if (!folderTerm) {
           // If no folder specified, list all available folders
