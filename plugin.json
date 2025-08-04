@@ -94,9 +94,36 @@
     {
       "Type": "checkbox",
       "Value": {
+        "Key": "showDomain",
+        "Label": "Show Domain",
+        "Tooltip": "Display the website domain in the subtitle",
+        "DefaultValue": "true"
+      }
+    },
+    {
+      "Type": "checkbox",
+      "Value": {
+        "Key": "showDateAdded",
+        "Label": "Show Date Added",
+        "Tooltip": "Display when the bookmark was added",
+        "DefaultValue": "true"
+      }
+    },
+    {
+      "Type": "checkbox",
+      "Value": {
+        "Key": "showLastUsed",
+        "Label": "Show Last Used",
+        "Tooltip": "Display when the bookmark was last used",
+        "DefaultValue": "true"
+      }
+    },
+    {
+      "Type": "checkbox",
+      "Value": {
         "Key": "showScore",
         "Label": "Show Search Score",
-        "Tooltip": "Display the relevance score next to last used date for debugging",
+        "Tooltip": "Display the relevance score for debugging",
         "DefaultValue": "false"
       }
     },
