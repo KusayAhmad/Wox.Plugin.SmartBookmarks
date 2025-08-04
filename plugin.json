@@ -90,6 +90,31 @@
         "Tooltip": "Display which browser each bookmark comes from",
         "DefaultValue": "true"
       }
+    },
+    {
+      "Type": "table",
+      "Value": {
+        "Key": "customicons",
+        "Title": "Custom Icons",
+        "Columns": [
+          {
+            "Key": "domain",
+            "Label": "Domain",
+            "Tooltip": "Website domain (e.g., google.com)",
+            "Placeholder": "google.com",
+            "Width": 200,
+            "Type": "text"
+          },
+          {
+            "Key": "iconUrl",
+            "Label": "Icon URL",
+            "Tooltip": "Direct URL to the favicon/icon",
+            "Placeholder": "https://example.com/favicon.ico",
+            "Width": 200,
+            "Type": "text"
+          }
+        ]
+      }
     }
   ]
 }

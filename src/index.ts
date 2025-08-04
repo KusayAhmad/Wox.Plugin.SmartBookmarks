@@ -220,7 +220,8 @@ class SmartBookmarksPlugin implements Plugin {
         refreshInterval: await this.api.GetSetting(ctx, "refreshInterval") || "30",
         maxResults: await this.api.GetSetting(ctx, "maxResults") || "20",
         includeLocalBookmarks: await this.api.GetSetting(ctx, "includeLocalBookmarks") || "true",
-        showBrowserSource: await this.api.GetSetting(ctx, "showBrowserSource") || "true"
+        showBrowserSource: await this.api.GetSetting(ctx, "showBrowserSource") || "true",
+        customicons: await this.api.GetSetting(ctx, "customicons") || "[]"
       };
     } else {
       // Fallback to default settings if API is not available
@@ -229,7 +230,8 @@ class SmartBookmarksPlugin implements Plugin {
         refreshInterval: "30",
         maxResults: "20",
         includeLocalBookmarks: "true",
-        showBrowserSource: "true"
+        showBrowserSource: "true",
+        customicons: "[]"
       };
     }
     
@@ -725,9 +727,90 @@ class SmartBookmarksPlugin implements Plugin {
     }
   }
 
+  private getCustomIconUrl(domain: string): string | null {
+    try {
+      const customIconsData = this.settings.customicons || "[]";
+      
+      // Try to parse as JSON array (table format)
+      try {
+        const customicons = JSON.parse(customIconsData);
+        
+        if (Array.isArray(customicons)) {
+          // Table format with keys: domain, iconUrl
+          for (const entry of customicons) {
+            if (entry.domain && entry.iconUrl) {
+              const entryDomain = entry.domain.toLowerCase().trim();
+              const targetDomain = domain.toLowerCase();
+              
+              // Check for exact match
+              if (entryDomain === targetDomain) {
+                return entry.iconUrl.trim();
+              }
+              
+              // Check for domain without www prefix
+              const domainWithoutWww = targetDomain.replace(/^www\./, '');
+              if (entryDomain === domainWithoutWww) {
+                return entry.iconUrl.trim();
+              }
+              
+              // Check for domain with www prefix
+              const domainWithWww = `www.${domainWithoutWww}`;
+              if (entryDomain === domainWithWww) {
+                return entry.iconUrl.trim();
+              }
+            }
+          }
+        }
+      } catch (jsonError) {
+        // If JSON parsing fails, try simple line format for backward compatibility
+        if (customIconsData.includes('|')) {
+          const lines = customIconsData.split('\n');
+          for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (trimmedLine && trimmedLine.includes('|')) {
+              const [entryDomain, iconUrl] = trimmedLine.split('|');
+              if (entryDomain && iconUrl) {
+                const cleanEntryDomain = entryDomain.trim().toLowerCase();
+                const targetDomain = domain.toLowerCase();
+                
+                if (cleanEntryDomain === targetDomain) {
+                  return iconUrl.trim();
+                }
+                
+                const domainWithoutWww = targetDomain.replace(/^www\./, '');
+                if (cleanEntryDomain === domainWithoutWww) {
+                  return iconUrl.trim();
+                }
+                
+                const domainWithWww = `www.${domainWithoutWww}`;
+                if (cleanEntryDomain === domainWithWww) {
+                  return iconUrl.trim();
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      console.error(`[SmartBookmarks] Error parsing custom icons:`, error);
+      return null;
+    }
+  }
+
   private getDynamicIcon(bookmark: Bookmark): { ImageType: "relative" | "url"; ImageData: string } {
     const url = bookmark.url.toLowerCase();
     const domain = this.extractDomain(url);
+    
+    // First, check for custom icons
+    if (domain) {
+      const customIconUrl = this.getCustomIconUrl(domain);
+      if (customIconUrl) {
+        console.log(`[SmartBookmarks] Using custom icon for ${domain}: ${customIconUrl}`);
+        return { ImageType: "url", ImageData: customIconUrl };
+      }
+    }
     
     // If we have a valid domain, use real favicon
     if (domain && domain.includes('.')) {
