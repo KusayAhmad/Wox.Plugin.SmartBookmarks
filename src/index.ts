@@ -51,6 +51,7 @@ class SmartBookmarksPlugin implements Plugin {
   private readonly CHECK_INTERVAL = 30000; // Default 30 seconds
   private settings: any = {};
   private api: PublicAPI | null = null;
+  private statsReset: boolean = false; // Track if stats have been reset
 
   private getEnabledBrowsers(): Array<'edge' | 'chrome' | 'brave'> {
     const enabledBrowsers = this.settings.enabledBrowsers || 'all';
@@ -178,7 +179,7 @@ class SmartBookmarksPlugin implements Plugin {
     return term.includes('chrome') || term.includes('edge') || term.includes('brave');
   }
 
-  private smartSearch(searchTerm: string): Bookmark[] {
+  private smartSearch(searchTerm: string): Array<{bookmark: Bookmark, score: number}> {
     if (!searchTerm || searchTerm.trim() === '') {
       // If no search term, show most recently used
       return this.bookmarks
@@ -187,7 +188,8 @@ class SmartBookmarksPlugin implements Plugin {
           const bLastUsed = b.lastUsed && b.lastUsed !== "0" && b.lastUsed !== "Never" ? new Date(b.lastUsed).getTime() : 0;
           return bLastUsed - aLastUsed;
         })
-        .slice(0, this.getMaxResults());
+        .slice(0, this.getMaxResults())
+        .map(bookmark => ({ bookmark, score: 50 })); // Default score for no search
     }
 
     const term = searchTerm.toLowerCase().trim();
@@ -201,8 +203,7 @@ class SmartBookmarksPlugin implements Plugin {
       }))
       .filter(item => item.score > 0) // Only results with positive scores
       .sort((a, b) => b.score - a.score) // Sort descending by score
-      .slice(0, maxResults)
-      .map(item => item.bookmark);
+      .slice(0, maxResults);
   }
 
   private shouldIncludeLocalBookmarks(): boolean {
@@ -213,6 +214,10 @@ class SmartBookmarksPlugin implements Plugin {
     return this.settings.showBrowserSource !== 'false';
   }
 
+  private shouldShowScore(): boolean {
+    return this.settings.showScore === 'true';
+  }
+
   private async loadSettings(ctx: Context): Promise<void> {
     if (this.api) {
       this.settings = {
@@ -221,6 +226,7 @@ class SmartBookmarksPlugin implements Plugin {
         maxResults: await this.api.GetSetting(ctx, "maxResults") || "20",
         includeLocalBookmarks: await this.api.GetSetting(ctx, "includeLocalBookmarks") || "true",
         showBrowserSource: await this.api.GetSetting(ctx, "showBrowserSource") || "true",
+        showScore: await this.api.GetSetting(ctx, "showScore") || "false",
         customicons: await this.api.GetSetting(ctx, "customicons") || "[]"
       };
     } else {
@@ -231,6 +237,7 @@ class SmartBookmarksPlugin implements Plugin {
         maxResults: "20",
         includeLocalBookmarks: "true",
         showBrowserSource: "true",
+        showScore: "false",
         customicons: "[]"
       };
     }
@@ -352,7 +359,9 @@ class SmartBookmarksPlugin implements Plugin {
           const chromeEpochDiff = 11644473600;
           const dateAddedMs = parseInt(item.date_added) / 1000 - chromeEpochDiff * 1000;
           const lastUsedMs = item.date_last_used !== "0" ? (parseInt(item.date_last_used) / 1000 - chromeEpochDiff * 1000) : 0;
-          const lastUsed = lastUsedMs > 0 ? new Date(lastUsedMs).toISOString() : "Never";
+          
+          // If stats have been reset, ignore browser's lastUsed data
+          const lastUsed = this.statsReset ? "Never" : (lastUsedMs > 0 ? new Date(lastUsedMs).toISOString() : "Never");
           
           // Extract domain name from URL
           let domain = '';
@@ -368,7 +377,7 @@ class SmartBookmarksPlugin implements Plugin {
             url: item.url!,
             description: `${browserName.charAt(0).toUpperCase() + browserName.slice(1)} • ${domain} • Added: ${new Date(dateAddedMs).toLocaleDateString()} • Last used: ${lastUsed === "Never" ? "Never" : new Date(lastUsedMs).toLocaleDateString()}`,
             source: browserName,
-            visitCount: 0, // Chrome doesn't store visit count in bookmarks
+            visitCount: 0, // Chrome doesn't store visit count in bookmarks, and reset if stats cleared
             lastUsed: lastUsed,
             dateAdded: new Date(dateAddedMs).toISOString(),
             folder: folderPath,
@@ -429,6 +438,7 @@ class SmartBookmarksPlugin implements Plugin {
     this.initialized = false;
     this.lastCheck = 0;
     this.watcher = null;
+    this.statsReset = false;
 
     // Bind methods to this instance
     this.init = this.init.bind(this);
@@ -588,10 +598,31 @@ class SmartBookmarksPlugin implements Plugin {
         }];
       }
       
+      if (term === 'reset' || term === 'clear stats') {
+        this.resetBookmarkStats();
+        return [{
+          Title: "Bookmark Statistics Reset",
+          SubTitle: `Reset visit counts and last used dates for all ${this.bookmarks.length} bookmarks`,
+          Icon: { ImageType: "relative", ImageData: "icon.png" },
+          Score: 1000
+        }];
+      }
+      
+      if (term === 'enable tracking' || term === 'restore stats') {
+        this.statsReset = false;
+        await this.refreshBookmarks();
+        return [{
+          Title: "Bookmark Statistics Tracking Enabled",
+          SubTitle: `Restored original browser usage statistics for all ${this.bookmarks.length} bookmarks`,
+          Icon: { ImageType: "relative", ImageData: "icon.png" },
+          Score: 1000
+        }];
+      }
+      
       if (term === 'settings' || term === 'config') {
         return [{
           Title: "Current Settings",
-          SubTitle: `Browsers: ${this.settings.enabledBrowsers} | Interval: ${this.settings.refreshInterval}s | Max: ${this.settings.maxResults}`,
+          SubTitle: `Browsers: ${this.settings.enabledBrowsers} | Interval: ${this.settings.refreshInterval}s | Max: ${this.settings.maxResults} | Show Source: ${this.settings.showBrowserSource} | Show Score: ${this.settings.showScore}`,
           Icon: { ImageType: "relative", ImageData: "icon.png" },
           Score: 1000
         }];
@@ -600,7 +631,7 @@ class SmartBookmarksPlugin implements Plugin {
       if (term === 'help' || term === '?') {
         return [{
           Title: "Smart Bookmarks Help",
-          SubTitle: "Usage: 'bm [term]' = Open | 'bm o [term]' = Open | 'bm c [term]' = Copy | 'bm i [term]' = Incognito",
+          SubTitle: "Usage: 'bm [term]' = Open | 'bm o [term]' = Open | 'bm c [term]' = Copy | 'bm i [term]' = Incognito | 'bm reset' = Clear Stats | 'bm restore stats' = Enable Tracking",
           Icon: { ImageType: "relative", ImageData: "icon.png" },
           Score: 1000
         }];
@@ -624,6 +655,7 @@ class SmartBookmarksPlugin implements Plugin {
       
       // Use new smart search
       const filteredBookmarks = this.smartSearch(searchTerm);
+      const showScore = this.shouldShowScore();
       
       // Get action icon and description
       const getActionInfo = (action: string) => {
@@ -640,39 +672,55 @@ class SmartBookmarksPlugin implements Plugin {
       const actionInfo = getActionInfo(actionType);
       
       return filteredBookmarks
-        .map((bm, index) => ({
-          Title: `${actionInfo.icon} ${bm.title}`,
-          SubTitle: showBrowserSource ? 
-            (bm.description || `${actionInfo.desc}: ${bm.url} ${bm.source ? `• ${bm.source.toUpperCase()}` : ''}`) :
-            (bm.description || `${actionInfo.desc}: ${bm.url}`),
-          Icon: this.getDynamicIcon(bm),
-          Score: 1000 - index,
-          ContextData: JSON.stringify({
-            url: bm.url,
-            title: bm.title,
-            action: actionType
-          }),
-          Actions: [{
-            Name: actionInfo.desc,
-            Action: async (context: any) => {
-              console.log(`[SmartBookmarks] ${actionInfo.desc}: ${bm.url}`);
-              
-              switch (actionType) {
-                case 'copy':
-                  this.copyUrlToClipboard(bm.url);
-                  break;
-                case 'incognito':
-                  this.updateBookmarkStats(bm);
-                  this.openUrlInIncognito(bm.url);
-                  break;
-                default:
-                  this.updateBookmarkStats(bm);
-                  this.openUrlDirectly(bm.url);
-                  break;
+        .map((item, index) => {
+          const bm = item.bookmark;
+          const score = item.score;
+          
+          // Build subtitle with optional score display
+          let subtitle = '';
+          if (showBrowserSource) {
+            subtitle = bm.description || `${actionInfo.desc}: ${bm.url} ${bm.source ? `• ${bm.source.toUpperCase()}` : ''}`;
+          } else {
+            subtitle = bm.description || `${actionInfo.desc}: ${bm.url}`;
+          }
+          
+          // Add score to subtitle if enabled
+          if (showScore) {
+            subtitle += ` • Score: ${score}`;
+          }
+          
+          return {
+            Title: `${actionInfo.icon} ${bm.title}`,
+            SubTitle: subtitle,
+            Icon: this.getDynamicIcon(bm),
+            Score: 1000 - index,
+            ContextData: JSON.stringify({
+              url: bm.url,
+              title: bm.title,
+              action: actionType
+            }),
+            Actions: [{
+              Name: actionInfo.desc,
+              Action: async (context: any) => {
+                console.log(`[SmartBookmarks] ${actionInfo.desc}: ${bm.url}`);
+                
+                switch (actionType) {
+                  case 'copy':
+                    this.copyUrlToClipboard(bm.url);
+                    break;
+                  case 'incognito':
+                    this.updateBookmarkStats(bm);
+                    this.openUrlInIncognito(bm.url);
+                    break;
+                  default:
+                    this.updateBookmarkStats(bm);
+                    this.openUrlDirectly(bm.url);
+                    break;
+                }
               }
-            }
-          }]
-        }));
+            }]
+          };
+        });
     } catch (error) {
       console.error(`[SmartBookmarks] Error in query:`, error);
       return [{
@@ -711,6 +759,36 @@ class SmartBookmarksPlugin implements Plugin {
       console.log(`[SmartBookmarks] Updated stats for: ${bookmark.title} (visits: ${bookmark.visitCount})`);
     } catch (error) {
       console.error(`[SmartBookmarks] Error updating bookmark stats:`, error);
+    }
+  }
+
+  private resetBookmarkStats(): void {
+    try {
+      // Set the reset flag to ignore browser's lastUsed data
+      this.statsReset = true;
+      
+      let resetCount = 0;
+      
+      for (const bookmark of this.bookmarks) {
+        // Reset visit count (this only affects runtime tracking)
+        if (bookmark.visitCount && bookmark.visitCount > 0) {
+          bookmark.visitCount = 0;
+          resetCount++;
+        }
+        
+        // Reset lastUsed to force all bookmarks to have equal priority
+        if (bookmark.lastUsed && bookmark.lastUsed !== "Never" && bookmark.lastUsed !== "0") {
+          bookmark.lastUsed = "Never";
+          resetCount++;
+        }
+      }
+      
+      // Force refresh of bookmarks from browser files with reset flag
+      this.refreshBookmarks();
+      
+      console.log(`[SmartBookmarks] Reset statistics for ${resetCount} bookmark entries and refreshed from browsers`);
+    } catch (error) {
+      console.error(`[SmartBookmarks] Error resetting bookmark stats:`, error);
     }
   }
 

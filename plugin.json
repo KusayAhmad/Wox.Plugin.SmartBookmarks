@@ -92,6 +92,15 @@
       }
     },
     {
+      "Type": "checkbox",
+      "Value": {
+        "Key": "showScore",
+        "Label": "Show Search Score",
+        "Tooltip": "Display the relevance score next to last used date for debugging",
+        "DefaultValue": "false"
+      }
+    },
+    {
       "Type": "table",
       "Value": {
         "Key": "customicons",
