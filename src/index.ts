@@ -44,6 +44,8 @@ interface ChromiumBookmarks {
   };
 }
 
+type Browser = 'edge' | 'chrome' | 'brave' | 'firefox';
+
 class SmartBookmarksPlugin implements Plugin {
   private static instance: SmartBookmarksPlugin | null = null;
   private bookmarks: Bookmark[] = [];
@@ -56,14 +58,69 @@ class SmartBookmarksPlugin implements Plugin {
   private api: PublicAPI | null = null;
   private statsReset: boolean = false; // Track if stats have been reset
 
-  private getEnabledBrowsers(): Array<'edge' | 'chrome' | 'brave' | 'firefox'> {
+  private getEnabledBrowsers(): Array<Browser> {
     const enabledBrowsers = this.settings.enabledBrowsers || 'all';
     
     if (enabledBrowsers === 'all') {
       return ['edge', 'chrome', 'brave', 'firefox'];
     }
     
-    return enabledBrowsers.split(',').map((b: string) => b.trim()) as Array<'edge' | 'chrome' | 'brave' | 'firefox'>;
+    return enabledBrowsers.split(',').map((b: string) => b.trim()) as Array<Browser>;
+  }
+
+  private getBrowserBookmarksPaths(browser: Browser): string[] {
+    const home = os.homedir();
+    let baseProfileDir: string;
+    let pattern: RegExp;
+    let filename: string;
+    let results: string[] = [];
+
+    switch (browser) {
+      case 'chrome':
+        baseProfileDir = path.join(home, 'AppData', 'Local', 'Google', 'Chrome', 'User Data');
+        pattern = /^Default$|^Profile \d+$/;
+        filename = 'Bookmarks';
+        break;
+      case 'edge':
+        baseProfileDir = path.join(home, 'AppData', 'Local', 'Microsoft', 'Edge', 'User Data');
+        pattern = /^Default$|^Profile \d+$/;
+        filename = 'Bookmarks';
+        break;
+      case 'brave':
+        baseProfileDir = path.join(home, 'AppData', 'Local', 'BraveSoftware', 'Brave-Browser', 'User Data');
+        pattern = /^Default$|^Profile \d+$/;
+        filename = 'Bookmarks';
+        break;
+      case 'firefox':
+        baseProfileDir = path.join(home, 'AppData', 'Roaming', 'Mozilla', 'Firefox', 'Profiles');
+        pattern = /default-release$|default-esr$|default$/;
+        filename = 'places.sqlite';
+        break;
+      default:
+        return [];
+    }
+
+    if (!fs.existsSync(baseProfileDir)) {
+      console.log(`[SmartBookmarks] ${browser} base directory not found: ${baseProfileDir}`);
+      return [];
+    }
+
+    // Read all profile directories
+    const dirs = fs.readdirSync(baseProfileDir, { withFileTypes: true });
+    console.log(`[SmartBookmarks] Found ${browser} profiles:`, dirs.filter(d => d.isDirectory()).map(d => d.name));
+
+    dirs.forEach(dir => {
+      if (!dir.isDirectory()) return;
+      if (!pattern.test(dir.name)) return;
+
+      const filePath = path.join(baseProfileDir, dir.name, filename);
+      if (fs.existsSync(filePath)) {
+        results.push(filePath);
+        console.log(`[SmartBookmarks] Found ${browser} bookmark file: ${filePath}`);
+      }
+    });
+
+    return results;
   }
 
   private getRefreshInterval(): number {
@@ -347,45 +404,38 @@ class SmartBookmarksPlugin implements Plugin {
     }
   }
 
-  private async loadBrowserBookmarks(browser: 'edge' | 'chrome' | 'brave' | 'firefox'): Promise<Bookmark[]> {
+  private async loadBrowserBookmarks(browser: Browser): Promise<Bookmark[]> {
     try {
-      if (browser === 'firefox') {
-        return await this.loadFirefoxBookmarks();
-      }
+      const bookmarkPaths = this.getBrowserBookmarksPaths(browser);
       
-      const bookmarksPath = this.getBrowserBookmarksPath(browser);
-      
-      if (!fs.existsSync(bookmarksPath)) {
-        console.log(`[SmartBookmarks] ${browser} bookmarks not found at: ${bookmarksPath}`);
+      if (bookmarkPaths.length === 0) {
+        console.log(`[SmartBookmarks] No ${browser} bookmark files found`);
         return [];
       }
 
-      const raw = fs.readFileSync(bookmarksPath, "utf-8");
-      const parsed = JSON.parse(raw) as ChromiumBookmarks;
-      const bookmarks = this.convertChromiumBookmarks(parsed, browser);
-      console.log(`[SmartBookmarks] Loaded ${bookmarks.length} ${browser} bookmarks`);
-      return bookmarks;
+      let allBookmarks: Bookmark[] = [];
+
+      for (const bookmarkPath of bookmarkPaths) {
+        try {
+          if (browser === 'firefox') {
+            const firefoxBookmarks = await this.loadFirefoxBookmarks(bookmarkPath);
+            allBookmarks = allBookmarks.concat(firefoxBookmarks);
+          } else {
+            const raw = fs.readFileSync(bookmarkPath, "utf-8");
+            const parsed = JSON.parse(raw) as ChromiumBookmarks;
+            const bookmarks = this.convertChromiumBookmarks(parsed, browser);
+            allBookmarks = allBookmarks.concat(bookmarks);
+          }
+        } catch (error) {
+          console.error(`[SmartBookmarks] Error loading bookmarks from ${bookmarkPath}:`, error);
+        }
+      }
+
+      console.log(`[SmartBookmarks] Loaded ${allBookmarks.length} ${browser} bookmarks from ${bookmarkPaths.length} profiles`);
+      return allBookmarks;
     } catch (error) {
       console.error(`[SmartBookmarks] Error loading ${browser} bookmarks:`, error);
       return [];
-    }
-  }
-
-  private getBrowserBookmarksPath(browser: 'edge' | 'chrome' | 'brave' | 'firefox'): string {
-    const localAppData = process.env.LOCALAPPDATA || '';
-    const appData = process.env.APPDATA || '';
-    
-    switch (browser) {
-      case 'edge':
-        return path.join(localAppData, 'Microsoft', 'Edge', 'User Data', 'Default', 'Bookmarks');
-      case 'chrome':
-        return path.join(localAppData, 'Google', 'Chrome', 'User Data', 'Default', 'Bookmarks');
-      case 'brave':
-        return path.join(localAppData, 'BraveSoftware', 'Brave-Browser', 'User Data', 'Default', 'Bookmarks');
-      case 'firefox':
-        return this.getFirefoxProfilePath();
-      default:
-        return '';
     }
   }
 
@@ -400,108 +450,43 @@ class SmartBookmarksPlugin implements Plugin {
       const watchedPaths: string[] = [];
 
       enabledBrowsers.forEach(browser => {
-        if (browser === 'firefox') {
-          const firefoxPath = this.getFirefoxProfilePath();
-          if (firefoxPath && fs.existsSync(firefoxPath)) {
-            watchedPaths.push(firefoxPath);
+        const bookmarkPaths = this.getBrowserBookmarksPaths(browser);
+        
+        bookmarkPaths.forEach(bookmarkPath => {
+          if (fs.existsSync(bookmarkPath)) {
+            watchedPaths.push(bookmarkPath);
             
-            fs.watch(firefoxPath, async (eventType, filename) => {
+            // Create individual watchers for each bookmark file
+            fs.watch(bookmarkPath, async (eventType, filename) => {
               if (filename) {
-                console.log(`[SmartBookmarks] Detected changes in Firefox bookmarks`);
-                setTimeout(() => this.refreshBookmarks(), 1000);
-              }
-            });
-          }
-        } else {
-          const bookmarksPath = this.getBrowserBookmarksPath(browser);
-          if (fs.existsSync(bookmarksPath)) {
-            watchedPaths.push(bookmarksPath);
-            
-            // Create individual watchers for each browser
-            fs.watch(bookmarksPath, async (eventType, filename) => {
-              if (filename) {
-                console.log(`[SmartBookmarks] Detected changes in ${browser} bookmarks`);
+                console.log(`[SmartBookmarks] Detected changes in ${browser} bookmarks: ${bookmarkPath}`);
                 // Add a small delay to ensure the file is fully written
                 setTimeout(() => this.refreshBookmarks(), 1000);
               }
             });
           }
-        }
+        });
       });
 
-      console.log(`[SmartBookmarks] Started watching browser bookmarks:`, watchedPaths);
+      console.log(`[SmartBookmarks] Started watching bookmark files:`, watchedPaths);
     } catch (error) {
       console.error(`[SmartBookmarks] Error setting up watcher:`, error);
     }
   }
 
-  private getFirefoxProfilePath(): string {
-    const profilesDir = path.join(
-      os.homedir(),
-      'AppData', 'Roaming', 'Mozilla', 'Firefox', 'Profiles'
-    );
-
-    try {
-      if (!fs.existsSync(profilesDir)) {
-        console.log(`[SmartBookmarks] Firefox profiles directory not found: ${profilesDir}`);
-        return '';
-      }
-
-      const dirs = fs.readdirSync(profilesDir, { withFileTypes: true });
-      console.log(`[SmartBookmarks] Found Firefox profiles:`, dirs.filter(d => d.isDirectory()).map(d => d.name));
-
-      // Look for profiles in order of preference:
-      // 1. *.default-release (most common in recent Firefox)
-      // 2. *.default-esr (Extended Support Release)
-      // 3. *.default (older versions)
-      // 4. First available directory
-      
-      let profileDir = dirs.find(d =>
-        d.isDirectory() && d.name.endsWith('default-release')
-      );
-
-      if (!profileDir) {
-        profileDir = dirs.find(d =>
-          d.isDirectory() && d.name.endsWith('default-esr')
-        );
-      }
-
-      if (!profileDir) {
-        profileDir = dirs.find(d =>
-          d.isDirectory() && d.name.endsWith('default')
-        );
-      }
-
-      if (!profileDir) {
-        // Fallback to first directory if no standard profile found
-        profileDir = dirs.find(d => d.isDirectory());
-      }
-
-      if (!profileDir) {
-        console.log(`[SmartBookmarks] No Firefox profile found`);
-        return '';
-      }
-
-      const profilePath = path.join(profilesDir, profileDir.name, 'places.sqlite');
-      console.log(`[SmartBookmarks] Selected Firefox profile: ${profileDir.name}`);
-      console.log(`[SmartBookmarks] Firefox profile path: ${profilePath}`);
-      return profilePath;
-    } catch (error) {
-      console.error(`[SmartBookmarks] Error finding Firefox profile:`, error);
-      return '';
-    }
-  }  private async loadFirefoxBookmarks(): Promise<Bookmark[]> {
+  private async loadFirefoxBookmarks(placesPath?: string): Promise<Bookmark[]> {
     return new Promise((resolve) => {
-      const placesPath = this.getFirefoxProfilePath();
+      // Use provided path or fallback to empty (will be handled by getBrowserBookmarksPaths)
+      const dbPath = placesPath;
       
-      if (!placesPath || !fs.existsSync(placesPath)) {
-        console.log(`[SmartBookmarks] Firefox places.sqlite not found`);
+      if (!dbPath || !fs.existsSync(dbPath)) {
+        console.log(`[SmartBookmarks] Firefox places.sqlite not found at: ${dbPath}`);
         resolve([]);
         return;
       }
       
       const bookmarks: Bookmark[] = [];
-      const db = new sqlite3.Database(placesPath, sqlite3.OPEN_READONLY, (err: Error | null) => {
+      const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY, (err: Error | null) => {
         if (err) {
           console.error(`[SmartBookmarks] Error opening Firefox database:`, err);
           resolve([]);
@@ -563,7 +548,7 @@ class SmartBookmarksPlugin implements Plugin {
             });
           });
           
-          console.log(`[SmartBookmarks] Loaded ${bookmarks.length} Firefox bookmarks`);
+          console.log(`[SmartBookmarks] Loaded ${bookmarks.length} Firefox bookmarks from ${dbPath}`);
           resolve(bookmarks);
         });
         
