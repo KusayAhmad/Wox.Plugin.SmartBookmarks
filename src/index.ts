@@ -59,13 +59,34 @@ class SmartBookmarksPlugin implements Plugin {
   private statsReset: boolean = false; // Track if stats have been reset
 
   private getEnabledBrowsers(): Array<Browser> {
-    const enabledBrowsers = this.settings.enabledBrowsers || 'all';
+    const enabledBrowsers: Array<Browser> = [];
     
-    if (enabledBrowsers === 'all') {
-      return ['edge', 'chrome', 'brave', 'firefox'];
+    // Check individual browser settings (new checkbox system)
+    if (this.settings.enableEdge === 'true') {
+      enabledBrowsers.push('edge');
+    }
+    if (this.settings.enableChrome === 'true') {
+      enabledBrowsers.push('chrome');
+    }
+    if (this.settings.enableBrave === 'true') {
+      enabledBrowsers.push('brave');
+    }
+    if (this.settings.enableFirefox === 'true') {
+      enabledBrowsers.push('firefox');
     }
     
-    return enabledBrowsers.split(',').map((b: string) => b.trim()) as Array<Browser>;
+    // Fallback to legacy setting or default
+    if (enabledBrowsers.length === 0) {
+      const legacyEnabledBrowsers = this.settings.enabledBrowsers || 'all';
+      
+      if (legacyEnabledBrowsers === 'all') {
+        return ['edge', 'chrome', 'brave', 'firefox'];
+      }
+      
+      return legacyEnabledBrowsers.split(',').map((b: string) => b.trim()) as Array<Browser>;
+    }
+    
+    return enabledBrowsers;
   }
 
   private getBrowserBookmarksPaths(browser: Browser): string[] {
@@ -336,7 +357,16 @@ class SmartBookmarksPlugin implements Plugin {
   private async loadSettings(ctx: Context): Promise<void> {
     if (this.api) {
       this.settings = {
+        // New checkbox-based browser settings
+        enableEdge: await this.api.GetSetting(ctx, "enableEdge") || "true",
+        enableChrome: await this.api.GetSetting(ctx, "enableChrome") || "true",
+        enableBrave: await this.api.GetSetting(ctx, "enableBrave") || "true",
+        enableFirefox: await this.api.GetSetting(ctx, "enableFirefox") || "true",
+        
+        // Legacy setting for backward compatibility
         enabledBrowsers: await this.api.GetSetting(ctx, "enabledBrowsers") || "all",
+        
+        // Other settings
         refreshInterval: await this.api.GetSetting(ctx, "refreshInterval") || "30",
         maxResults: await this.api.GetSetting(ctx, "maxResults") || "20",
         includeLocalBookmarks: await this.api.GetSetting(ctx, "includeLocalBookmarks") || "true",
@@ -350,6 +380,10 @@ class SmartBookmarksPlugin implements Plugin {
     } else {
       // Fallback to default settings if API is not available
       this.settings = {
+        enableEdge: "true",
+        enableChrome: "true",
+        enableBrave: "true",
+        enableFirefox: "true",
         enabledBrowsers: "all",
         refreshInterval: "30",
         maxResults: "20",
@@ -874,9 +908,10 @@ class SmartBookmarksPlugin implements Plugin {
       }
       
       if (term === 'settings' || term === 'config') {
+        const enabledBrowsersList = this.getEnabledBrowsers().join(', ');
         return [{
           Title: "Current Settings",
-          SubTitle: `Browsers: ${this.settings.enabledBrowsers} | Interval: ${this.settings.refreshInterval}s | Max: ${this.settings.maxResults}`,
+          SubTitle: `Browsers: ${enabledBrowsersList} | Interval: ${this.settings.refreshInterval}s | Max: ${this.settings.maxResults}`,
           Icon: { ImageType: "relative", ImageData: "icon.png" },
           Score: 1000
         }];

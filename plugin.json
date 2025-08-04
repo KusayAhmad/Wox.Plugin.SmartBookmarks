@@ -5,9 +5,9 @@
     "bookmark"
   ],
   "Name": "Smart Bookmarks (TS)",
-  "Description": "Smart Bookmarks plugin for Wox - Supports Edge, Chrome, Brave browsers and local bookmarks",
+  "Description": "Smart Bookmarks plugin for Wox - Supports Edge, Chrome, Brave, Firefox browsers and local bookmarks with multi-profile support",
   "Author": "Kusay Ahmad",
-  "Version": "0.1.0",
+  "Version": "1.0.0",
   "MinWoxVersion": "2.0.0",
   "Runtime": "Nodejs",
   "Website": "https://github.com/KusayAhmad/Wox.Plugin.SmartBookmarks",
@@ -18,73 +18,39 @@
   ],
   "SettingDefinitions": [
     {
-      "Type": "select",
+      "Type": "checkbox",
       "Value": {
-        "Key": "enabledBrowsers",
-        "Label": "Enabled Browsers",
-        "DefaultValue": "all",
-        "Options": [
-          {
-            "Label": "All browsers",
-            "Value": "all"
-          },
-          {
-            "Label": "Edge only",
-            "Value": "edge"
-          },
-          {
-            "Label": "Chrome only",
-            "Value": "chrome"
-          },
-          {
-            "Label": "Brave only",
-            "Value": "brave"
-          },
-          {
-            "Label": "Firefox only",
-            "Value": "firefox"
-          },
-          {
-            "Label": "Edge + Chrome",
-            "Value": "edge,chrome"
-          },
-          {
-            "Label": "Edge + Brave",
-            "Value": "edge,brave"
-          },
-          {
-            "Label": "Edge + Firefox",
-            "Value": "edge,firefox"
-          },
-          {
-            "Label": "Chrome + Brave",
-            "Value": "chrome,brave"
-          },
-          {
-            "Label": "Chrome + Firefox",
-            "Value": "chrome,firefox"
-          },
-          {
-            "Label": "Brave + Firefox",
-            "Value": "brave,firefox"
-          },
-          {
-            "Label": "Edge + Chrome + Brave",
-            "Value": "edge,chrome,brave"
-          },
-          {
-            "Label": "Edge + Chrome + Firefox",
-            "Value": "edge,chrome,firefox"
-          },
-          {
-            "Label": "Edge + Brave + Firefox",
-            "Value": "edge,brave,firefox"
-          },
-          {
-            "Label": "Chrome + Brave + Firefox",
-            "Value": "chrome,brave,firefox"
-          }
-        ]
+        "Key": "enableEdge",
+        "Label": "Enable Edge Browser",
+        "Tooltip": "Load bookmarks from Microsoft Edge browser",
+        "DefaultValue": "true"
+      }
+    },
+    {
+      "Type": "checkbox",
+      "Value": {
+        "Key": "enableChrome",
+        "Label": "Enable Chrome Browser",
+        "Tooltip": "Load bookmarks from Google Chrome browser",
+        "DefaultValue": "true"
+      }
+    },
+    {
+      "Type": "checkbox",
+      "Value": {
+        "Key": "enableBrave",
+        "Label": "Enable Brave Browser",
+        "Tooltip": "Load bookmarks from Brave browser",
+        "DefaultValue": "true"
+      }
+    },
+    {
+      "Type": "checkbox",
+      "Value": {
+        "Key": "enableFirefox",
+        "Label": "Enable Firefox Browser",
+        "Tooltip": "Load bookmarks from Mozilla Firefox browser",
+        "DefaultValue": "true"
       }
     },
     {
