@@ -41,6 +41,10 @@
             "Value": "brave"
           },
           {
+            "Label": "Firefox only",
+            "Value": "firefox"
+          },
+          {
             "Label": "Edge + Chrome",
             "Value": "edge,chrome"
           },
@@ -49,8 +53,36 @@
             "Value": "edge,brave"
           },
           {
+            "Label": "Edge + Firefox",
+            "Value": "edge,firefox"
+          },
+          {
             "Label": "Chrome + Brave",
             "Value": "chrome,brave"
+          },
+          {
+            "Label": "Chrome + Firefox",
+            "Value": "chrome,firefox"
+          },
+          {
+            "Label": "Brave + Firefox",
+            "Value": "brave,firefox"
+          },
+          {
+            "Label": "Edge + Chrome + Brave",
+            "Value": "edge,chrome,brave"
+          },
+          {
+            "Label": "Edge + Chrome + Firefox",
+            "Value": "edge,chrome,firefox"
+          },
+          {
+            "Label": "Edge + Brave + Firefox",
+            "Value": "edge,brave,firefox"
+          },
+          {
+            "Label": "Chrome + Brave + Firefox",
+            "Value": "chrome,brave,firefox"
           }
         ]
       }

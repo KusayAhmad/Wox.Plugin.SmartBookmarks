@@ -7,10 +7,12 @@
     "build": "tsc && powershell -Command \"Write-Host 'Copying files to dist...'; Copy-Item plugin.json,icon.png,bookmarks.json -Destination dist\\ -Force -Verbose; if ($?) { Write-Host 'Files copied successfully' } else { Write-Host 'Failed to copy some files' -ForegroundColor Red }\""
   },
   "dependencies": {
-    "@wox-launcher/wox-plugin": "^0.0.85"
+    "@wox-launcher/wox-plugin": "^0.0.85",
+    "sqlite3": "^5.1.7"
   },
   "devDependencies": {
     "@types/node": "^24.1.0",
+    "@types/sqlite3": "^3.1.11",
     "typescript": "^5.4.5"
   }
 }

@@ -39,3 +39,6 @@ Thumbs.db
 
 # Debug files
 debug.log
+
+# Ignore package-lock.json to prevent conflicts with npm versions
+package-lock.json
