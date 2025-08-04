@@ -21,7 +21,7 @@
       "Type": "checkbox",
       "Value": {
         "Key": "enableEdge",
-        "Label": "Enable Edge Browser",
+        "Label": "🌐 Enable Edge Browser",
         "Tooltip": "Load bookmarks from Microsoft Edge browser",
         "DefaultValue": "true"
       }
@@ -30,16 +30,19 @@
       "Type": "checkbox",
       "Value": {
         "Key": "enableChrome",
-        "Label": "Enable Chrome Browser",
+        "Label": "   🌐 Enable Chrome Browser",
         "Tooltip": "Load bookmarks from Google Chrome browser",
         "DefaultValue": "true"
       }
     },
     {
+      "Type": "newline"
+    },
+    {
       "Type": "checkbox",
       "Value": {
         "Key": "enableBrave",
-        "Label": "Enable Brave Browser",
+        "Label": "🌐 Enable Brave Browser",
         "Tooltip": "Load bookmarks from Brave browser",
         "DefaultValue": "true"
       }
@@ -48,16 +51,19 @@
       "Type": "checkbox",
       "Value": {
         "Key": "enableFirefox",
-        "Label": "Enable Firefox Browser",
+        "Label": "🌐 Enable Firefox Browser",
         "Tooltip": "Load bookmarks from Mozilla Firefox browser",
         "DefaultValue": "true"
       }
     },
     {
+      "Type": "newline"
+    },
+    {
       "Type": "textbox",
       "Value": {
         "Key": "refreshInterval",
-        "Label": "Refresh Interval (seconds)",
+        "Label": "⚙️ Refresh Interval (seconds)",
         "Tooltip": "How often to check for bookmark updates (minimum 10 seconds)",
         "DefaultValue": "30"
       }
@@ -66,25 +72,31 @@
       "Type": "textbox",
       "Value": {
         "Key": "maxResults",
-        "Label": "Maximum Results",
+        "Label": "   ⚙️ Maximum Results",
         "Tooltip": "Maximum number of bookmarks to show in search results",
         "DefaultValue": "20"
       }
     },
     {
+      "Type": "newline"
+    },
+    {
       "Type": "checkbox",
       "Value": {
         "Key": "includeLocalBookmarks",
-        "Label": "Include Local Bookmarks",
+        "Label": "⚙️ Include Local Bookmarks",
         "Tooltip": "Include bookmarks from the local bookmarks.json file",
         "DefaultValue": "true"
       }
     },
     {
+      "Type": "newline"
+    },
+    {
       "Type": "checkbox",
       "Value": {
         "Key": "showBrowserSource",
-        "Label": "Show Browser Source",
+        "Label": "🎨 Show Browser Source",
         "Tooltip": "Display which browser each bookmark comes from",
         "DefaultValue": "true"
       }
@@ -93,16 +105,19 @@
       "Type": "checkbox",
       "Value": {
         "Key": "showDomain",
-        "Label": "Show Domain",
+        "Label": "   🎨 Show Domain",
         "Tooltip": "Display the website domain in the subtitle",
         "DefaultValue": "true"
       }
     },
     {
+      "Type": "newline"
+    },
+    {
       "Type": "checkbox",
       "Value": {
         "Key": "showDateAdded",
-        "Label": "Show Date Added",
+        "Label": "🎨 Show Date Added",
         "Tooltip": "Display when the bookmark was added",
         "DefaultValue": "true"
       }
@@ -111,19 +126,25 @@
       "Type": "checkbox",
       "Value": {
         "Key": "showLastUsed",
-        "Label": "Show Last Used",
+        "Label": "   🎨 Show Last Used",
         "Tooltip": "Display when the bookmark was last used",
         "DefaultValue": "true"
       }
     },
     {
+      "Type": "newline"
+    },
+    {
       "Type": "checkbox",
       "Value": {
         "Key": "showScore",
-        "Label": "Show Search Score",
+        "Label": "🎨 Show Search Score",
         "Tooltip": "Display the relevance score for debugging",
         "DefaultValue": "false"
       }
+    },
+    {
+      "Type": "newline"
     },
     {
       "Type": "table",
