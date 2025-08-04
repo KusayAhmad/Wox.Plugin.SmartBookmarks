@@ -607,6 +607,73 @@ class SmartBookmarksPlugin implements Plugin {
         await this.refreshBookmarks();
       }
 
+      let searchTerm = query.Search.toLowerCase();
+      const maxAllowedResults = this.getMaxResults();
+
+      // Handle folder-specific commands
+      const folderSearchQuery = query.Search.toLowerCase();
+
+      // Handle folder-specific commands
+      if (folderSearchQuery.startsWith('folder:')) {
+        const folderTerm = folderSearchQuery.substring(7).trim();
+
+        if (!folderTerm) {
+          // If no folder specified, list all available folders
+          const folders = this.getAvailableFolders();
+          return folders.map(folder => ({
+            Title: `📁 ${folder}`,
+            SubTitle: `Search bookmarks in folder: ${folder}`,
+            Icon: { ImageType: "relative", ImageData: "icon.png" },
+            Score: 1000,
+            ContextData: JSON.stringify({ folder })
+          }));
+        }
+
+        // Split folder term and additional search term
+        const [folderName, ...additionalTerms] = folderTerm.split(' ');
+        const folderNameLower = folderName.toLowerCase();
+        const additionalSearchTerm = additionalTerms.join(' ').toLowerCase();
+
+        // إذا كان هناك تطابق جزئي أو كامل مع اسم المجلد، اعرض المفضلات داخله
+        const filteredBookmarks = this.bookmarks.filter(bm => 
+            bm.folder && bm.folder.toLowerCase().includes(folderNameLower) &&
+            (!additionalSearchTerm || bm.title.toLowerCase().includes(additionalSearchTerm))
+        );
+
+        // إذا لم يوجد أي مفضلة، اعرض اقتراحات المجلدات المطابقة
+        if (filteredBookmarks.length === 0) {
+            const matchingFolders = this.getAvailableFolders().filter(folder => 
+                folder.toLowerCase().includes(folderTerm.toLowerCase())
+            );
+            if (matchingFolders.length > 0) {
+                return matchingFolders.map(folder => ({
+                  Title: `📁 ${folder}`,
+                  SubTitle: `Search bookmarks in folder: ${folder}`,
+                  Icon: { ImageType: "relative", ImageData: "icon.png" },
+                  Score: 1000,
+                  ContextData: JSON.stringify({ folder })
+                }));
+            }
+        }
+
+        return filteredBookmarks
+            .map((bm, index) => ({
+                Title: bm.title,
+                SubTitle: this.buildDynamicDescription(bm, 'Open', this.calculateScore(bm, additionalSearchTerm)),
+                Icon: this.getDynamicIcon(bm),
+                Score: 1000 - index,
+                ContextData: JSON.stringify({
+                    url: bm.url,
+                    title: bm.title,
+                    folder: bm.folder
+                }),
+                Actions: [{
+                    Name: 'Open',
+                    Action: async () => this.openUrlDirectly(bm.url)
+                }]
+            }));
+      }
+
       console.log(`[SmartBookmarks] Query received: "${query.Search}"`);
       console.log(`[SmartBookmarks] Plugin state:`, {
         initialized: this.initialized,
@@ -631,7 +698,6 @@ class SmartBookmarksPlugin implements Plugin {
       const showBrowserSource = this.shouldShowBrowserSource();
       
       // Handle action-specific commands
-      let searchTerm = query.Search;
       let actionType = 'open';
       
       if (term.startsWith('o ')) {
@@ -749,6 +815,16 @@ class SmartBookmarksPlugin implements Plugin {
         Score: 0
       }];
     }
+  }
+
+  private getAvailableFolders(): string[] {
+    const folders = new Set<string>();
+    this.bookmarks.forEach(bm => {
+      if (bm.folder) {
+        folders.add(bm.folder);
+      }
+    });
+    return Array.from(folders);
   }
 
   async openUrl(ctx: Context, ...params: any[]): Promise<void> {
