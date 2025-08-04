@@ -375,7 +375,7 @@ class SmartBookmarksPlugin implements Plugin {
           results.push({
             title: item.name,
             url: item.url!,
-            description: `${browserName.charAt(0).toUpperCase() + browserName.slice(1)} • ${domain} • Added: ${new Date(dateAddedMs).toLocaleDateString()} • Last used: ${lastUsed === "Never" ? "Never" : new Date(lastUsedMs).toLocaleDateString()}`,
+            description: `${domain} • Added: ${new Date(dateAddedMs).toLocaleDateString()} • Last used: ${lastUsed === "Never" ? "Never" : new Date(lastUsedMs).toLocaleDateString()}`,
             source: browserName,
             visitCount: 0, // Chrome doesn't store visit count in bookmarks, and reset if stats cleared
             lastUsed: lastUsed,
@@ -407,7 +407,7 @@ class SmartBookmarksPlugin implements Plugin {
           results.push({
             title: item.name,
             url: item.url!,
-            description: `Edge Bookmark - ${new Date(parseInt(item.date_added) / 1000).toLocaleDateString()}`,
+            description: `Bookmark - ${new Date(parseInt(item.date_added) / 1000).toLocaleDateString()}`,
             source: 'edge'
           });
         } else if (item.type === 'folder' && item.children) {
@@ -679,8 +679,11 @@ class SmartBookmarksPlugin implements Plugin {
           // Build subtitle with optional score display
           let subtitle = '';
           if (showBrowserSource) {
-            subtitle = bm.description || `${actionInfo.desc}: ${bm.url} ${bm.source ? `• ${bm.source.toUpperCase()}` : ''}`;
+            // Show browser source with description
+            const browserInfo = bm.source ? `${bm.source.charAt(0).toUpperCase() + bm.source.slice(1)} • ` : '';
+            subtitle = bm.description ? `${browserInfo}${bm.description}` : `${actionInfo.desc}: ${bm.url} ${bm.source ? `• ${bm.source.toUpperCase()}` : ''}`;
           } else {
+            // Don't show browser source
             subtitle = bm.description || `${actionInfo.desc}: ${bm.url}`;
           }
           
