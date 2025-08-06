@@ -34,7 +34,12 @@
 - `bm optimize cache` - Optimize cache size and remove unnecessary entries  
 - `bm cache health` - Get comprehensive cache health report with recommendations
 
-### Developer Notes
+### Fixed Issues
+- **Critical Score Ranking Bug**: Fixed incorrect result ordering where Wox scores were based on position (`1000 - index`) instead of actual SearchEngine scores
+  - Search results now properly use calculated scores from SearchEngine algorithm
+  - Higher scored bookmarks now correctly appear first regardless of browser profile
+  - Folder search results also now use proper scoring system
+- **Enhanced Folder Search**: `searchInFolder` method now returns SearchResult objects with proper scoring instead of plain Bookmark objects
 - CacheManager now features validateCacheIntegrity() method with corruption detection
 - optimizeCacheSize() implements intelligent cleanup with preservation logic
 - getCacheHealth() provides comprehensive status monitoring and recommendations

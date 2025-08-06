@@ -160,15 +160,37 @@ export class SearchEngine {
     return results;
   }
 
-  searchInFolder(bookmarks: Bookmark[], folderTerm: string): Bookmark[] {
+  searchInFolder(bookmarks: Bookmark[], folderTerm: string): SearchResult[] {
     const [folderName, ...additionalTerms] = folderTerm.split(' ');
     const folderNameLower = folderName.toLowerCase();
     const additionalSearchTerm = additionalTerms.join(' ').toLowerCase();
 
-    return bookmarks.filter(bm => 
+    const filteredBookmarks = bookmarks.filter(bm => 
       bm.folder && bm.folder.toLowerCase().includes(folderNameLower) &&
       (!additionalSearchTerm || bm.title.toLowerCase().includes(additionalSearchTerm))
     );
+
+    // If there's an additional search term, use smart search scoring
+    if (additionalSearchTerm) {
+      return filteredBookmarks
+        .map(bookmark => ({
+          bookmark,
+          score: this.calculateScore(bookmark, additionalSearchTerm)
+        }))
+        .sort((a, b) => b.score - a.score);
+    } else {
+      // If no additional search term, sort by recency or give equal scores
+      return filteredBookmarks
+        .sort((a, b) => {
+          const aLastUsed = a.lastUsed && a.lastUsed !== "0" && a.lastUsed !== "Never" ? new Date(a.lastUsed).getTime() : 0;
+          const bLastUsed = b.lastUsed && b.lastUsed !== "0" && b.lastUsed !== "Never" ? new Date(b.lastUsed).getTime() : 0;
+          return bLastUsed - aLastUsed;
+        })
+        .map((bookmark, index) => ({
+          bookmark,
+          score: 500 - index // Descending scores to maintain order
+        }));
+    }
   }
 
   getAvailableFolders(bookmarks: Bookmark[]): string[] {

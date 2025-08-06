@@ -577,7 +577,7 @@ class SmartBookmarksPlugin implements Plugin {
           Title: `${actionInfo.icon} ${result.bookmark.title}`,
           SubTitle: result.bookmark.description || this.buildDynamicDescription(result.bookmark, actionInfo.desc, result.score),
           Icon: this.iconManager.getDynamicIcon(result.bookmark),
-          Score: 1000 - index,
+          Score: Math.max(result.score, 1), // Use actual calculated score from SearchEngine
           ContextData: JSON.stringify({
             url: result.bookmark.url,
             title: result.bookmark.title,
@@ -616,10 +616,10 @@ class SmartBookmarksPlugin implements Plugin {
     }
 
     // Search in folder
-    const filteredBookmarks = this.searchEngine.searchInFolder(this.bookmarks, folderTerm);
+    const filteredResults = this.searchEngine.searchInFolder(this.bookmarks, folderTerm);
 
     // If no bookmarks found, show matching folders
-    if (filteredBookmarks.length === 0) {
+    if (filteredResults.length === 0) {
       const matchingFolders = this.searchEngine.getMatchingFolders(this.bookmarks, folderTerm);
       if (matchingFolders.length > 0) {
         return matchingFolders.map(folder => ({
@@ -632,22 +632,22 @@ class SmartBookmarksPlugin implements Plugin {
       }
     }
 
-    return filteredBookmarks
-      .map((bm, index) => ({
-        Title: bm.title,
-        SubTitle: this.buildDynamicDescription(bm, 'Open'),
-        Icon: this.iconManager.getDynamicIcon(bm),
-        Score: 1000 - index,
+    return filteredResults
+      .map((result, index) => ({
+        Title: result.bookmark.title,
+        SubTitle: this.buildDynamicDescription(result.bookmark, 'Open', result.score),
+        Icon: this.iconManager.getDynamicIcon(result.bookmark),
+        Score: Math.max(result.score, 1), // Use actual calculated score
         ContextData: JSON.stringify({
-          url: bm.url,
-          title: bm.title,
-          folder: bm.folder,
+          url: result.bookmark.url,
+          title: result.bookmark.title,
+          folder: result.bookmark.folder,
           action: 'open'
         }),
         Actions: [{
           Name: 'Open',
           Action: async () => {
-            await this.actionManager.executeAction('open', bm);
+            await this.actionManager.executeAction('open', result.bookmark);
           }
         }]
       }));
