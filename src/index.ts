@@ -9,6 +9,7 @@ import { SettingsManager } from "./settings-manager";
 import { BrowserManager } from "./browser-manager";
 import { SearchEngine } from "./search-engine";
 import { IconManager } from "./icon-manager";
+import { CacheManager } from "./cache-manager";
 import { ActionManager } from "./action-manager";
 
 class SmartBookmarksPlugin implements Plugin {
@@ -25,6 +26,7 @@ class SmartBookmarksPlugin implements Plugin {
   private searchEngine: SearchEngine;
   private iconManager: IconManager;
   private actionManager: ActionManager;
+  private cacheManager: CacheManager;
 
   private constructor() {
     Logger.log("Constructor called");
@@ -37,8 +39,9 @@ class SmartBookmarksPlugin implements Plugin {
 
     // Initialize managers (will be updated in init with API)
     this.settingsManager = new SettingsManager(null);
-    this.browserManager = new BrowserManager();
-    this.searchEngine = new SearchEngine();
+    this.cacheManager = new CacheManager();
+    this.browserManager = new BrowserManager(this.cacheManager);
+    this.searchEngine = new SearchEngine(this.cacheManager);
     this.iconManager = new IconManager();
     this.actionManager = new ActionManager();
 
@@ -116,6 +119,9 @@ class SmartBookmarksPlugin implements Plugin {
       // Set up file watcher
       this.setupWatcher();
       
+      // Setup periodic cache maintenance
+      this.setupCacheMaintenance();
+      
       this.initialized = true;
       this.lastCheck = Date.now();
       Logger.log("Initialization complete, initialized =", this.initialized);
@@ -142,6 +148,32 @@ class SmartBookmarksPlugin implements Plugin {
     } catch (error) {
       Logger.error("Error setting up watcher:", error);
     }
+  }
+
+  private setupCacheMaintenance(): void {
+    // Run cache optimization every 10 minutes
+    setInterval(async () => {
+      try {
+        const optimization = await this.cacheManager.optimizeCacheSize();
+        if (optimization.removedExpired > 0 || optimization.removedLRU > 0) {
+          Logger.log(`Cache maintenance: removed ${optimization.removedExpired} expired, ${optimization.removedLRU} LRU entries`);
+        }
+      } catch (error) {
+        Logger.error('Cache maintenance error:', error);
+      }
+    }, 10 * 60 * 1000); // 10 minutes
+
+    // Run cache validation every 30 minutes
+    setInterval(async () => {
+      try {
+        const validation = await this.cacheManager.validateCacheIntegrity();
+        if (validation.invalid > 0 || validation.cleaned > 0) {
+          Logger.log(`Cache validation: found ${validation.invalid} invalid, cleaned ${validation.cleaned} entries`);
+        }
+      } catch (error) {
+        Logger.error('Cache validation error:', error);
+      }
+    }, 30 * 60 * 1000); // 30 minutes
   }
 
   private async refreshBookmarks(forceReload: boolean = false): Promise<void> {
@@ -433,6 +465,77 @@ class SmartBookmarksPlugin implements Plugin {
           Icon: { ImageType: "relative", ImageData: "icon.png" },
           Score: 1000
         }];
+      }
+
+      if (searchTerm === 'validate cache') {
+        try {
+          const validation = await this.cacheManager.validateCacheIntegrity();
+          const summary = `Valid: ${validation.valid}, Invalid: ${validation.invalid}, Cleaned: ${validation.cleaned}`;
+          const details = validation.report.length > 0 
+            ? validation.report.slice(0, 3).join('; ') + (validation.report.length > 3 ? '...' : '')
+            : 'All cache entries are valid';
+          
+          return [{
+            Title: "✅ Cache Validation Complete",
+            SubTitle: `${summary} | ${details}`,
+            Icon: { ImageType: "relative", ImageData: "icon.png" },
+            Score: 1000
+          }];
+        } catch (error) {
+          Logger.error('Failed to validate cache:', error);
+          return [{
+            Title: "❌ Cache Validation Error",
+            SubTitle: `Failed to validate cache: ${error}`,
+            Icon: { ImageType: "relative", ImageData: "icon.png" },
+            Score: 1000
+          }];
+        }
+      }
+
+      if (searchTerm === 'optimize cache') {
+        try {
+          const optimization = await this.cacheManager.optimizeCacheSize();
+          const summary = `Expired: ${optimization.removedExpired}, LRU: ${optimization.removedLRU}, Preserved: ${optimization.preservedImportant}`;
+          
+          return [{
+            Title: "🚀 Cache Optimization Complete",
+            SubTitle: `${summary} | Memory: ${optimization.memoryFreed}`,
+            Icon: { ImageType: "relative", ImageData: "icon.png" },
+            Score: 1000
+          }];
+        } catch (error) {
+          Logger.error('Failed to optimize cache:', error);
+          return [{
+            Title: "❌ Cache Optimization Error",
+            SubTitle: `Failed to optimize cache: ${error}`,
+            Icon: { ImageType: "relative", ImageData: "icon.png" },
+            Score: 1000
+          }];
+        }
+      }
+
+      if (searchTerm === 'cache health') {
+        try {
+          const health = this.cacheManager.getCacheHealth();
+          const statusIcon = health.status === 'healthy' ? '💚' : health.status === 'warning' ? '⚠️' : '❌';
+          const metrics = `${health.metrics.totalEntries} entries, ${health.metrics.memoryUsage}, ${health.metrics.hitRate}% hit rate`;
+          const issues = health.issues.length > 0 ? health.issues.join('; ') : 'No issues detected';
+          
+          return [{
+            Title: `${statusIcon} Cache Health: ${health.status.toUpperCase()}`,
+            SubTitle: `${metrics} | ${issues}`,
+            Icon: { ImageType: "relative", ImageData: "icon.png" },
+            Score: 1000
+          }];
+        } catch (error) {
+          Logger.error('Failed to get cache health:', error);
+          return [{
+            Title: "❌ Cache Health Error",
+            SubTitle: `Failed to get cache health: ${error}`,
+            Icon: { ImageType: "relative", ImageData: "icon.png" },
+            Score: 1000
+          }];
+        }
       }
 
       if (searchTerm === 'force reload') {

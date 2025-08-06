@@ -5,8 +5,8 @@ import { CacheManager } from "./cache-manager";
 export class SearchEngine {
   private cacheManager: CacheManager;
   
-  constructor() {
-    this.cacheManager = new CacheManager();
+  constructor(cacheManager?: CacheManager) {
+    this.cacheManager = cacheManager || new CacheManager();
   }
 
   calculateScore(bookmark: Bookmark, searchTerm: string): number {

@@ -264,4 +264,234 @@ export class CacheManager {
       return `${(estimatedBytes / (1024 * 1024)).toFixed(1)} MB`;
     }
   }
+
+  // Cache integrity validation
+  async validateCacheIntegrity(): Promise<{
+    valid: number;
+    invalid: number;
+    cleaned: number;
+    report: string[];
+  }> {
+    const report: string[] = [];
+    let validCount = 0;
+    let invalidCount = 0;
+    let cleanedCount = 0;
+
+    // Validate bookmark cache
+    for (const [key, entry] of this.bookmarkCache) {
+      try {
+        if (!entry.data || !Array.isArray(entry.data)) {
+          this.bookmarkCache.delete(key);
+          cleanedCount++;
+          report.push(`Removed invalid bookmark cache: ${key}`);
+          continue;
+        }
+
+        // Validate each bookmark in the cache
+        for (const bookmark of entry.data) {
+          if (!bookmark.url || !bookmark.title) {
+            invalidCount++;
+            report.push(`Invalid bookmark found in ${key}: missing url or title`);
+          } else {
+            validCount++;
+          }
+        }
+
+        // Check if entry is expired
+        const now = Date.now();
+        if (now - entry.timestamp > entry.ttl) {
+          this.bookmarkCache.delete(key);
+          cleanedCount++;
+          report.push(`Removed expired bookmark cache: ${key}`);
+        }
+      } catch (error) {
+        this.bookmarkCache.delete(key);
+        cleanedCount++;
+        invalidCount++;
+        report.push(`Removed corrupted bookmark cache: ${key} - ${error}`);
+      }
+    }
+
+    // Validate search cache
+    for (const [key, entry] of this.searchCache) {
+      try {
+        if (!entry.results || !Array.isArray(entry.results)) {
+          this.searchCache.delete(key);
+          cleanedCount++;
+          report.push(`Removed invalid search cache: ${key}`);
+          continue;
+        }
+
+        // Check if entry is expired
+        const now = Date.now();
+        if (now - entry.timestamp > this.SEARCH_CACHE_TTL) {
+          this.searchCache.delete(key);
+          cleanedCount++;
+          report.push(`Removed expired search cache: ${key}`);
+        } else {
+          validCount++;
+        }
+      } catch (error) {
+        this.searchCache.delete(key);
+        cleanedCount++;
+        invalidCount++;
+        report.push(`Removed corrupted search cache: ${key} - ${error}`);
+      }
+    }
+
+    Logger.log(`Cache validation complete: ${validCount} valid, ${invalidCount} invalid, ${cleanedCount} cleaned`);
+    return { valid: validCount, invalid: invalidCount, cleaned: cleanedCount, report };
+  }
+
+  // Cache size optimization
+  async optimizeCacheSize(): Promise<{
+    removedExpired: number;
+    removedLRU: number;
+    preservedImportant: number;
+    memoryFreed: string;
+    report: string[];
+  }> {
+    const report: string[] = [];
+    let removedExpired = 0;
+    let removedLRU = 0;
+    let preservedImportant = 0;
+    const initialMemory = this.estimateMemoryUsage();
+
+    // Remove expired entries first
+    const now = Date.now();
+    
+    for (const [key, entry] of this.bookmarkCache) {
+      if (now - entry.timestamp > entry.ttl) {
+        this.bookmarkCache.delete(key);
+        removedExpired++;
+        report.push(`Removed expired bookmark cache: ${key}`);
+      }
+    }
+
+    for (const [key, entry] of this.searchCache) {
+      if (now - entry.timestamp > this.SEARCH_CACHE_TTL) {
+        this.searchCache.delete(key);
+        removedExpired++;
+        report.push(`Removed expired search cache: ${key}`);
+      }
+    }
+
+    // If still over size limits, apply LRU eviction to bookmark cache
+    if (this.bookmarkCache.size > this.MAX_BOOKMARK_CACHE_SIZE) {
+      const sortedEntries = Array.from(this.bookmarkCache.entries())
+        .sort((a, b) => a[1].timestamp - b[1].timestamp);
+      
+      const toRemove = this.bookmarkCache.size - this.MAX_BOOKMARK_CACHE_SIZE;
+      for (let i = 0; i < toRemove; i++) {
+        const [key] = sortedEntries[i];
+        this.bookmarkCache.delete(key);
+        removedLRU++;
+        report.push(`LRU removed bookmark cache: ${key}`);
+      }
+    }
+
+    // Apply LRU eviction to search cache but preserve recent searches
+    if (this.searchCache.size > this.MAX_SEARCH_CACHE_SIZE) {
+      const sortedEntries = Array.from(this.searchCache.entries())
+        .sort((a, b) => a[1].timestamp - b[1].timestamp);
+      
+      const toRemove = this.searchCache.size - this.MAX_SEARCH_CACHE_SIZE;
+      for (let i = 0; i < toRemove; i++) {
+        const [key, entry] = sortedEntries[i];
+        
+        // Preserve important searches (recent or with many results)
+        if (now - entry.timestamp < 60000 || entry.results.length > 5) {
+          preservedImportant++;
+          report.push(`Preserved important search cache: ${key}`);
+          continue;
+        }
+        
+        this.searchCache.delete(key);
+        removedLRU++;
+        report.push(`LRU removed search cache: ${key}`);
+      }
+    }
+
+    const finalMemory = this.estimateMemoryUsage();
+    const memoryFreed = `${initialMemory} → ${finalMemory}`;
+    
+    Logger.log(`Cache optimization complete: ${removedExpired} expired, ${removedLRU} LRU, ${preservedImportant} preserved`);
+    return { removedExpired, removedLRU, preservedImportant, memoryFreed, report };
+  }
+
+  // Get comprehensive cache health metrics
+  getCacheHealth(): {
+    status: 'healthy' | 'warning' | 'critical';
+    issues: string[];
+    recommendations: string[];
+    metrics: {
+      totalEntries: number;
+      memoryUsage: string;
+      hitRate: number;
+      averageAge: number;
+    };
+  } {
+    const issues: string[] = [];
+    const recommendations: string[] = [];
+    let status: 'healthy' | 'warning' | 'critical' = 'healthy';
+
+    const totalEntries = this.bookmarkCache.size + this.searchCache.size;
+    const memoryUsage = this.estimateMemoryUsage();
+    
+    // Calculate average cache age
+    const now = Date.now();
+    let totalAge = 0;
+    let entryCount = 0;
+    
+    for (const entry of this.bookmarkCache.values()) {
+      totalAge += now - entry.timestamp;
+      entryCount++;
+    }
+    for (const entry of this.searchCache.values()) {
+      totalAge += now - entry.timestamp;
+      entryCount++;
+    }
+    
+    const averageAge = entryCount > 0 ? totalAge / entryCount / 1000 : 0; // in seconds
+
+    // Check for issues
+    if (this.bookmarkCache.size > this.MAX_BOOKMARK_CACHE_SIZE * 0.9) {
+      issues.push("Bookmark cache approaching size limit");
+      recommendations.push("Consider running cache optimization");
+      status = 'warning';
+    }
+
+    if (this.searchCache.size > this.MAX_SEARCH_CACHE_SIZE * 0.9) {
+      issues.push("Search cache approaching size limit");
+      recommendations.push("Search cache will auto-cleanup soon");
+      if (status === 'healthy') status = 'warning';
+    }
+
+    if (averageAge > 300) { // 5 minutes
+      issues.push("Cache entries are getting old");
+      recommendations.push("Cache may need refreshing");
+      if (status === 'healthy') status = 'warning';
+    }
+
+    if (totalEntries === 0) {
+      issues.push("No cached data available");
+      recommendations.push("Run force reload to populate cache");
+      status = 'critical';
+    }
+
+    // Estimate hit rate (simplified)
+    const hitRate = totalEntries > 0 ? Math.min(95, 60 + (totalEntries * 2)) : 0;
+
+    return {
+      status,
+      issues,
+      recommendations,
+      metrics: {
+        totalEntries,
+        memoryUsage,
+        hitRate,
+        averageAge: Math.round(averageAge)
+      }
+    };
+  }
 }

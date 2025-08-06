@@ -12,8 +12,8 @@ export class BrowserManager {
   private cacheManager: CacheManager;
   private fileWatchers: Map<string, fs.FSWatcher> = new Map();
 
-  constructor() {
-    this.cacheManager = new CacheManager();
+  constructor(cacheManager?: CacheManager) {
+    this.cacheManager = cacheManager || new CacheManager();
   }
 
   setStatsReset(reset: boolean): void {
