@@ -1,9 +1,13 @@
 import { Bookmark, SearchResult } from "./interfaces";
 import { Logger } from "./logger";
+import { CacheManager } from "./cache-manager";
 
 export class SearchEngine {
+  private cacheManager: CacheManager;
   
-  constructor() {}
+  constructor() {
+    this.cacheManager = new CacheManager();
+  }
 
   calculateScore(bookmark: Bookmark, searchTerm: string): number {
     if (!searchTerm || searchTerm.trim() === '') return 50;
@@ -114,6 +118,15 @@ export class SearchEngine {
   }
 
   smartSearch(bookmarks: Bookmark[], searchTerm: string, maxResults: number): SearchResult[] {
+    // Check cache first for non-empty search terms
+    if (searchTerm && searchTerm.trim() !== '') {
+      const cachedResults = this.cacheManager.getCachedSearchResults(searchTerm);
+      if (cachedResults) {
+        Logger.log(`Search cache hit for term: "${searchTerm}"`);
+        return cachedResults.slice(0, maxResults);
+      }
+    }
+
     if (!searchTerm || searchTerm.trim() === '') {
       // If no search term, show most recently used
       return bookmarks
@@ -129,7 +142,7 @@ export class SearchEngine {
     const term = searchTerm.toLowerCase().trim();
 
     // Apply search and sorting
-    return bookmarks
+    const results = bookmarks
       .map(bookmark => ({
         bookmark,
         score: this.calculateScore(bookmark, term)
@@ -137,6 +150,14 @@ export class SearchEngine {
       .filter(item => item.score > 0) // Only results with positive scores
       .sort((a, b) => b.score - a.score) // Sort descending by score
       .slice(0, maxResults);
+
+    // Cache the results for future use
+    if (searchTerm && searchTerm.trim() !== '') {
+      this.cacheManager.cacheSearchResults(searchTerm, results);
+      Logger.log(`Cached ${results.length} search results for term: "${searchTerm}"`);
+    }
+
+    return results;
   }
 
   searchInFolder(bookmarks: Bookmark[], folderTerm: string): Bookmark[] {
@@ -164,5 +185,18 @@ export class SearchEngine {
     return this.getAvailableFolders(bookmarks).filter(folder => 
       folder.toLowerCase().includes(folderTerm.toLowerCase())
     );
+  }
+
+  // Cache management methods
+  invalidateSearchCache(searchTerm?: string): void {
+    this.cacheManager.invalidateSearchCache(searchTerm);
+  }
+
+  getCacheStats(): any {
+    return this.cacheManager.getCacheStats();
+  }
+
+  clearAllCaches(): void {
+    this.cacheManager.invalidateAllCaches();
   }
 }

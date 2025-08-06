@@ -104,7 +104,7 @@ class SmartBookmarksPlugin implements Plugin {
       const enabledBrowsers = this.settingsManager.getEnabledBrowsers();
       
       for (const browser of enabledBrowsers) {
-        const bookmarks = await this.browserManager.loadBrowserBookmarks(browser);
+        const bookmarks = await this.browserManager.loadBrowserBookmarks(browser, false); // Don't force on init
         browserBookmarks = browserBookmarks.concat(bookmarks);
       }
 
@@ -135,7 +135,7 @@ class SmartBookmarksPlugin implements Plugin {
 
       const enabledBrowsers = this.settingsManager.getEnabledBrowsers();
       this.browserManager.setupWatcher(enabledBrowsers, () => {
-        this.refreshBookmarks();
+        this.refreshBookmarks(true); // Force reload when files change
       });
 
       Logger.log("File watcher setup complete");
@@ -144,7 +144,7 @@ class SmartBookmarksPlugin implements Plugin {
     }
   }
 
-  private async refreshBookmarks(): Promise<void> {
+  private async refreshBookmarks(forceReload: boolean = false): Promise<void> {
     try {
       let allBookmarks: Bookmark[] = [];
 
@@ -153,31 +153,50 @@ class SmartBookmarksPlugin implements Plugin {
         const localBookmarksPath = path.join(this.pluginDir, "bookmarks.json");
         
         if (fs.existsSync(localBookmarksPath)) {
-          const raw = fs.readFileSync(localBookmarksPath, "utf-8");
-          const parsed = JSON.parse(raw);
-          const localBookmarks = Array.isArray(parsed) ? parsed : [];
-          allBookmarks = allBookmarks.concat(localBookmarks);
-          Logger.log(`Refreshed ${localBookmarks.length} local bookmarks`);
+          try {
+            const raw = await fs.promises.readFile(localBookmarksPath, "utf-8");
+            const parsed = JSON.parse(raw);
+            const localBookmarks = Array.isArray(parsed) ? parsed : [];
+            allBookmarks = allBookmarks.concat(localBookmarks);
+            Logger.log(`Refreshed ${localBookmarks.length} local bookmarks`);
+          } catch (error) {
+            Logger.error("Error loading local bookmarks:", error);
+          }
         }
       }
 
-      // Load browser bookmarks based on settings
+      // Load browser bookmarks based on settings (now cached and async)
       const enabledBrowsers = this.settingsManager.getEnabledBrowsers();
-      let browserBookmarks: Bookmark[] = [];
       
-      for (const browser of enabledBrowsers) {
-        const bookmarks = await this.browserManager.loadBrowserBookmarks(browser);
-        browserBookmarks = browserBookmarks.concat(bookmarks);
+      // If forceReload is true, clear cache first
+      if (forceReload) {
+        enabledBrowsers.forEach(browser => {
+          this.browserManager.invalidateCache(browser);
+        });
+        Logger.log("Cleared browser caches for forced reload");
       }
+      
+      // Process browsers in parallel for better performance
+      const browserPromises = enabledBrowsers.map(async (browser) => {
+        try {
+          return await this.browserManager.loadBrowserBookmarks(browser, forceReload);
+        } catch (error) {
+          Logger.error(`Error loading ${browser} bookmarks:`, error);
+          return [];
+        }
+      });
 
+      const browserResults = await Promise.all(browserPromises);
+      const browserBookmarks = browserResults.flat();
       allBookmarks = allBookmarks.concat(browserBookmarks);
 
       // Update bookmarks and icon manager
       this.bookmarks = allBookmarks;
       this.iconManager.setCustomIconsData(this.settingsManager.getCustomIcons());
       this.lastCheck = Date.now();
+      
       Logger.log(`Total bookmarks after refresh: ${this.bookmarks.length}`);
-      Logger.log("Enabled browsers:", enabledBrowsers);
+      Logger.log("Cache stats:", this.browserManager.getCacheStats());
     } catch (error) {
       Logger.error("Error refreshing bookmarks:", error);
     }
@@ -281,14 +300,78 @@ class SmartBookmarksPlugin implements Plugin {
       
       // Handle special commands
       if (searchTerm === 'reload' || searchTerm === 'refresh') {
+        // Clear all caches first
+        try {
+          if (typeof this.searchEngine.clearAllCaches === 'function') {
+            this.searchEngine.clearAllCaches();
+          } else {
+            Logger.error("clearAllCaches method not found on searchEngine");
+          }
+          
+          if (typeof this.browserManager.invalidateCache === 'function') {
+            this.browserManager.invalidateCache();
+          } else {
+            Logger.error("invalidateCache method not found on browserManager");
+          }
+        } catch (error) {
+          Logger.error("Error clearing caches:", error);
+        }
+        
         await this.settingsManager.loadSettings(ctx);
-        await this.refreshBookmarks();
+        await this.refreshBookmarks(true); // Force reload with cache clearing
         return [{
           Title: "Settings and Bookmarks Reloaded",
           SubTitle: `Loaded ${this.bookmarks.length} bookmarks with current settings`,
           Icon: { ImageType: "relative", ImageData: "icon.png" },
           Score: 1000
         }];
+      }
+
+      if (searchTerm === 'cache' || searchTerm === 'cache stats') {
+        try {
+          const searchCacheStats = this.searchEngine.getCacheStats();
+          const browserCacheStats = this.browserManager.getCacheStats();
+          
+          return [{
+            Title: "Cache Statistics",
+            SubTitle: `Memory: ${browserCacheStats.memoryUsage} | Search: ${searchCacheStats.searchCacheSize} | Bookmarks: ${browserCacheStats.bookmarkCacheSize}`,
+            Icon: { ImageType: "relative", ImageData: "icon.png" },
+            Score: 1000
+          }];
+        } catch (error) {
+          Logger.error("Error getting cache stats:", error);
+          return [{
+            Title: "Cache Stats Error",
+            SubTitle: error instanceof Error ? error.message : String(error),
+            Icon: { ImageType: "relative", ImageData: "icon.png" },
+            Score: 1000
+          }];
+        }
+      }
+
+      if (searchTerm === 'clear cache') {
+        try {
+          if (typeof this.searchEngine.clearAllCaches === 'function') {
+            this.searchEngine.clearAllCaches();
+          }
+          if (typeof this.browserManager.invalidateCache === 'function') {
+            this.browserManager.invalidateCache();
+          }
+          return [{
+            Title: "Cache Cleared",
+            SubTitle: "All caches have been cleared successfully",
+            Icon: { ImageType: "relative", ImageData: "icon.png" },
+            Score: 1000
+          }];
+        } catch (error) {
+          Logger.error("Error clearing cache:", error);
+          return [{
+            Title: "Clear Cache Error",
+            SubTitle: error instanceof Error ? error.message : String(error),
+            Icon: { ImageType: "relative", ImageData: "icon.png" },
+            Score: 1000
+          }];
+        }
       }
       
       if (searchTerm === 'settings' || searchTerm === 'config') {
@@ -307,6 +390,62 @@ class SmartBookmarksPlugin implements Plugin {
         return [{
           Title: "Smart Bookmarks Help",
           SubTitle: "Usage: 'bm [term]' = Open | 'bm o [term]' = Open | 'bm c [term]' = Copy | 'bm i [term]' = Incognito",
+          Icon: { ImageType: "relative", ImageData: "icon.png" },
+          Score: 1000
+        }];
+      }
+
+      if (searchTerm === 'debug' || searchTerm === 'info') {
+        const enabledBrowsers = this.settingsManager.getEnabledBrowsers();
+        const bookmarkCount = this.bookmarks.length;
+        const searchCacheStats = this.searchEngine.getCacheStats();
+        const browserCacheStats = this.browserManager.getCacheStats();
+        
+        let debugInfo = `Bookmarks: ${bookmarkCount} | `;
+        debugInfo += `Browsers: [${enabledBrowsers.join(',')}] | `;
+        debugInfo += `SearchCache: ${searchCacheStats.searchCacheSize} | `;
+        debugInfo += `BrowserCache: ${browserCacheStats.bookmarkCacheSize} | `;
+        debugInfo += `Memory: ${browserCacheStats.memoryUsage}`;
+        
+        return [{
+          Title: "Debug Information",
+          SubTitle: debugInfo,
+          Icon: { ImageType: "relative", ImageData: "icon.png" },
+          Score: 1000
+        }];
+      }
+
+      if (searchTerm === 'cache debug') {
+        // Detailed cache debugging
+        const enabledBrowsers = this.settingsManager.getEnabledBrowsers();
+        const searchCacheStats = this.searchEngine.getCacheStats();
+        const browserCacheStats = this.browserManager.getCacheStats();
+        
+        let debugInfo = `Total Bookmarks: ${this.bookmarks.length} | `;
+        debugInfo += `Enabled Browsers: [${enabledBrowsers.join(',')}] | `;
+        debugInfo += `Search Cache: Search=${searchCacheStats.searchCacheSize}, SearchBookmarks=${searchCacheStats.bookmarkCacheSize} | `;
+        debugInfo += `Browser Cache: Bookmarks=${browserCacheStats.bookmarkCacheSize}, FileStats=${browserCacheStats.fileStatsCacheSize} | `;
+        debugInfo += `Memory: ${browserCacheStats.memoryUsage}`;
+        
+        return [{
+          Title: "Cache Debug Information",
+          SubTitle: debugInfo,
+          Icon: { ImageType: "relative", ImageData: "icon.png" },
+          Score: 1000
+        }];
+      }
+
+      if (searchTerm === 'force reload') {
+        // Force complete reload
+        this.searchEngine.clearAllCaches();
+        this.browserManager.invalidateCache();
+        await this.settingsManager.loadSettings(ctx);
+        await this.refreshBookmarks(true);
+        
+        const cacheStats = this.searchEngine.getCacheStats();
+        return [{
+          Title: "Force Reload Complete",
+          SubTitle: `Loaded ${this.bookmarks.length} bookmarks | Cache: ${cacheStats.bookmarkCacheSize} browsers`,
           Icon: { ImageType: "relative", ImageData: "icon.png" },
           Score: 1000
         }];

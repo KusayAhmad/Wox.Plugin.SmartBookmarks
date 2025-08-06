@@ -1,14 +1,20 @@
 import * as fs from "fs";
+import { promises as fsPromises } from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as sqlite3 from "sqlite3";
 import { Browser, Bookmark, ChromiumBookmarks, ChromiumBookmark } from "./interfaces";
 import { Logger } from "./logger";
+import { CacheManager } from "./cache-manager";
 
 export class BrowserManager {
   private statsReset: boolean = false;
+  private cacheManager: CacheManager;
+  private fileWatchers: Map<string, fs.FSWatcher> = new Map();
 
-  constructor() {}
+  constructor() {
+    this.cacheManager = new CacheManager();
+  }
 
   setStatsReset(reset: boolean): void {
     this.statsReset = reset;
@@ -68,8 +74,22 @@ export class BrowserManager {
     return results;
   }
 
-  async loadBrowserBookmarks(browser: Browser): Promise<Bookmark[]> {
+  async loadBrowserBookmarks(browser: Browser, forceReload: boolean = false): Promise<Bookmark[]> {
     try {
+      // Check cache first (only if not forcing reload)
+      const cacheKey = `bookmarks_${browser}`;
+      
+      if (!forceReload) {
+        const cachedBookmarks = this.cacheManager.getCachedBookmarks(cacheKey);
+        
+        if (cachedBookmarks) {
+          Logger.log(`Cache hit for ${browser} bookmarks`);
+          return cachedBookmarks;
+        }
+      } else {
+        Logger.log(`Force reload requested for ${browser} bookmarks`);
+      }
+
       const bookmarkPaths = this.getBrowserBookmarksPaths(browser);
       
       if (bookmarkPaths.length === 0) {
@@ -79,26 +99,63 @@ export class BrowserManager {
 
       let allBookmarks: Bookmark[] = [];
 
-      for (const bookmarkPath of bookmarkPaths) {
+      // Process files in parallel for better performance
+      const bookmarkPromises = bookmarkPaths.map(async (bookmarkPath) => {
         try {
+          // Check if file has changed before processing (skip if forcing reload)
+          const fileStats = await this.getFileStats(bookmarkPath);
+          if (!fileStats) {
+            return [];
+          }
+
           if (browser === 'firefox') {
-            const firefoxBookmarks = await this.loadFirefoxBookmarks(bookmarkPath);
-            allBookmarks = allBookmarks.concat(firefoxBookmarks);
+            return await this.loadFirefoxBookmarks(bookmarkPath);
           } else {
-            const raw = fs.readFileSync(bookmarkPath, "utf-8");
-            const parsed = JSON.parse(raw) as ChromiumBookmarks;
-            const bookmarks = this.convertChromiumBookmarks(parsed, browser);
-            allBookmarks = allBookmarks.concat(bookmarks);
+            return await this.loadChromiumBookmarks(bookmarkPath, browser);
           }
         } catch (error) {
           Logger.error(`Error loading bookmarks from ${bookmarkPath}:`, error);
+          return [];
         }
-      }
+      });
+
+      const results = await Promise.all(bookmarkPromises);
+      allBookmarks = results.flat();
+
+      // Always cache the results (whether forced or not)
+      this.cacheManager.cacheBookmarks(cacheKey, allBookmarks);
+      Logger.log(`Created cache for ${browser} with ${allBookmarks.length} bookmarks`);
 
       Logger.log(`Loaded ${allBookmarks.length} ${browser} bookmarks from ${bookmarkPaths.length} profiles`);
       return allBookmarks;
     } catch (error) {
       Logger.error(`Error loading ${browser} bookmarks:`, error);
+      return [];
+    }
+  }
+
+  private async getFileStats(filePath: string): Promise<{ mtime: number; size: number } | null> {
+    try {
+      const stats = await fsPromises.stat(filePath);
+      return {
+        mtime: stats.mtime.getTime(),
+        size: stats.size
+      };
+    } catch (error) {
+      Logger.error(`Error getting file stats for ${filePath}:`, error);
+      return null;
+    }
+  }
+
+  private async loadChromiumBookmarks(bookmarkPath: string, browser: Browser): Promise<Bookmark[]> {
+    try {
+      const raw = await fsPromises.readFile(bookmarkPath, "utf-8");
+      const parsed = JSON.parse(raw) as ChromiumBookmarks;
+      const bookmarks = this.convertChromiumBookmarks(parsed, browser);
+      Logger.log(`Loaded ${bookmarks.length} bookmarks from ${bookmarkPath}`);
+      return bookmarks;
+    } catch (error) {
+      Logger.error(`Error loading Chromium bookmarks from ${bookmarkPath}:`, error);
       return [];
     }
   }
@@ -253,5 +310,22 @@ export class BrowserManager {
     } catch (error) {
       Logger.error(`Error setting up watcher:`, error);
     }
+  }
+
+  // Cache management methods
+  invalidateCache(browser?: Browser): void {
+    if (browser) {
+      const cacheKey = `bookmarks_${browser}`;
+      this.cacheManager.invalidateBookmarkCache(cacheKey);
+      Logger.log(`Invalidated cache for ${browser}`);
+    } else {
+      // Clear all browser caches
+      this.cacheManager.invalidateAllCaches();
+      Logger.log(`Cleared all browser caches`);
+    }
+  }
+
+  getCacheStats(): any {
+    return this.cacheManager.getCacheStats();
   }
 }
